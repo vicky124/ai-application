@@ -5,7 +5,7 @@ from app.config import DEFAULT_MODELS, ModelSpec, Settings
 from app.container import get_container
 from app.providers.generators import LangChainGenerator, ModelCatalog, ModelUnavailable, content_text
 
-GEMINI_IDS = ["gemini-flash", "gemini-pro", "gemini-2.5-flash"]
+GEMINI_IDS = ["gemini-3.5-flash-lite"]
 
 
 def settings(**kw):
@@ -21,7 +21,7 @@ def test_default_catalog_offers_gemini_next_to_local_models():
 
 
 def test_gemini_availability_depends_on_the_api_key():
-    spec = next(m for m in DEFAULT_MODELS if m.id == "gemini-flash")
+    spec = next(m for m in DEFAULT_MODELS if m.id == "gemini-3.5-flash-lite")
     missing = ModelCatalog(DEFAULT_MODELS, settings()).describe(spec)
     assert missing["available"] is False and "GOOGLE_API_KEY" in missing["unavailable_reason"] and missing["local"] is False
     present = ModelCatalog(DEFAULT_MODELS, settings(google_api_key="fake-key")).describe(spec)
@@ -48,16 +48,16 @@ def test_gemini_key_can_come_from_either_env_name(monkeypatch):
 
 def test_catalog_refuses_gemini_without_key_and_builds_it_with_one():
     with pytest.raises(ModelUnavailable, match="GOOGLE_API_KEY"):
-        ModelCatalog(DEFAULT_MODELS, settings()).get("gemini-flash")
-    generator = ModelCatalog(DEFAULT_MODELS, settings(google_api_key="fake-key")).get("gemini-flash")  # no network until invoked
+        ModelCatalog(DEFAULT_MODELS, settings()).get("gemini-3.5-flash-lite")
+    generator = ModelCatalog(DEFAULT_MODELS, settings(google_api_key="fake-key")).get("gemini-3.5-flash-lite")  # no network until invoked
     assert isinstance(generator, LangChainGenerator)
 
 
 def test_models_config_can_pin_a_gemini_model(tmp_path):
     path = tmp_path / "models.json"
-    path.write_text('[{"id": "g-pinned", "label": "Pinned", "provider": "gemini", "name": "gemini-2.5-pro", "default": true}]')
+    path.write_text('[{"id": "g-pinned", "label": "Pinned", "provider": "gemini", "name": "gemini-3.5-flash", "default": true}]')
     cfg = settings(models_config=str(path))
-    assert [m.id for m in cfg.models] == ["g-pinned"] and cfg.models[0].name == "gemini-2.5-pro"
+    assert [m.id for m in cfg.models] == ["g-pinned"] and cfg.models[0].name == "gemini-3.5-flash"
 
 
 def test_content_text_handles_string_and_part_lists():
@@ -97,9 +97,9 @@ def test_api_lists_gemini_models_as_unavailable_without_a_key(client, alice):
 
 
 def test_api_chat_with_gemini_and_no_key_is_a_clear_503(client, alice):
-    r = client.post("/api/chat", headers=alice, json={"question": "How many sick days?", "model_id": "gemini-flash"})
+    r = client.post("/api/chat", headers=alice, json={"question": "How many sick days?", "model_id": "gemini-3.5-flash-lite"})
     assert r.status_code == 503
-    assert "GOOGLE_API_KEY" in r.json()["detail"] and "gemini-flash" in r.json()["detail"]
+    assert "GOOGLE_API_KEY" in r.json()["detail"] and "gemini-3.5-flash-lite" in r.json()["detail"]
 
 
 def test_api_chat_end_to_end_through_a_fake_gemini(client, alice, monkeypatch):
@@ -112,14 +112,14 @@ def test_api_chat_end_to_end_through_a_fake_gemini(client, alice, monkeypatch):
 
     container = get_container()
     monkeypatch.setattr(app_settings, "google_api_key", "fake-key")
-    monkeypatch.setitem(container.models._cache, "gemini-flash", FakeGemini())
-    r = client.post("/api/chat", headers=alice, json={"question": "How many days of sick leave do I get?", "model_id": "gemini-flash"})
+    monkeypatch.setitem(container.models._cache, "gemini-3.5-flash-lite", FakeGemini())
+    r = client.post("/api/chat", headers=alice, json={"question": "How many days of sick leave do I get?", "model_id": "gemini-3.5-flash-lite"})
     assert r.status_code == 200, r.text
     body = r.json()
-    assert body["model_id"] == "gemini-flash" and not body["abstained"]
+    assert body["model_id"] == "gemini-3.5-flash-lite" and not body["abstained"]
     assert body["verification"]["passed"] is True and body["sources"][0]["title"] == "Leave Policy"
     listed = {m["id"]: m for m in client.get("/api/models", headers=alice).json()["models"]}
-    assert listed["gemini-flash"]["available"] is True  # the key now makes it selectable
+    assert listed["gemini-3.5-flash-lite"]["available"] is True  # the key now makes it selectable
 
 
 def test_api_provider_failure_does_not_leak_details(client, alice, monkeypatch):
@@ -130,7 +130,7 @@ def test_api_provider_failure_does_not_leak_details(client, alice, monkeypatch):
             raise RuntimeError("quota exceeded for key AIza-SECRET-VALUE")
 
     monkeypatch.setattr(app_settings, "google_api_key", "fake-key")
-    monkeypatch.setitem(get_container().models._cache, "gemini-pro", Exploding())
-    r = client.post("/api/chat", headers=alice, json={"question": "How many days of sick leave do I get?", "model_id": "gemini-pro"})
+    monkeypatch.setitem(get_container().models._cache, "gemini-3.5-flash-lite", Exploding())
+    r = client.post("/api/chat", headers=alice, json={"question": "How many days of sick leave do I get?", "model_id": "gemini-3.5-flash-lite"})
     assert r.status_code == 503
     assert "AIza" not in r.text and "SECRET" not in r.text and "RuntimeError" in r.json()["detail"]

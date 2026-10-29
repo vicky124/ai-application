@@ -395,8 +395,8 @@ ModelSpec(id="llama3.1-8b", label="Llama 3.1 8B (Ollama)", provider="ollama",
 ```
 
 **Config level**
-- Defaults live in `config.py` (`DEFAULT_MODELS`): Llama 3.1 8B (default), Qwen 2.5 7B, Mistral 7B (all Ollama, local), three **Gemini** models (Google, cloud) and `extractive`.
-- **Gemini** uses `langchain-google-genai`. The defaults are the floating aliases `gemini-flash-latest` and `gemini-pro-latest` (they follow Google's current Flash and Pro, so no code change when Google retires a version) plus the stable `gemini-2.5-flash`. Google's model lineup changes often: check [Google's model list](https://ai.google.dev/gemini-api/docs/models) and pin exact ids in `MODELS_CONFIG` when you need reproducible behavior.
+- Defaults live in `config.py` (`DEFAULT_MODELS`): Llama 3.1 8B (default), Qwen 2.5 7B, Mistral 7B (all Ollama, local), one **Gemini** model (Google, cloud) and `extractive`.
+- **Gemini** uses `langchain-google-genai`. The single default is `gemini-3.5-flash-lite`, the one found to work with the project's key (real question answered, cited and verified through the app in about 25 s). Google retires models quickly: the 2.5 family returned "no longer available to new users" and the `-latest` aliases timed out or hit quota on the same key, so none of those are defaults. Check [Google's model list](https://ai.google.dev/gemini-api/docs/models) and your key's quota, then add, replace or pin entries in `MODELS_CONFIG` (a `provider: "gemini"` entry with the model `name`); no code change is needed.
 - The key comes from `GOOGLE_API_KEY` (or `GEMINI_API_KEY`) in `backend/.env`. Without it the Gemini options are still listed but marked unavailable.
 - Override with `MODELS_CONFIG=/path/models.json`, a JSON array of `ModelSpec` objects. Example:
   ```json

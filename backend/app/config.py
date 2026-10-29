@@ -24,10 +24,9 @@ DEFAULT_MODELS = [
     ModelSpec(id="llama3.1-8b", label="Llama 3.1 8B (Ollama)", provider="ollama", name="llama3.1:8b", default=True),
     ModelSpec(id="qwen2.5-7b", label="Qwen 2.5 7B (Ollama)", provider="ollama", name="qwen2.5:7b"),
     ModelSpec(id="mistral-7b", label="Mistral 7B (Ollama)", provider="ollama", name="mistral:7b"),
-    # Google Gemini (cloud). Floating aliases follow Google's current Flash/Pro; override ids in MODELS_CONFIG to pin.
-    ModelSpec(id="gemini-flash", label="Gemini Flash, latest (Google, cloud)", provider="gemini", name="gemini-flash-latest"),
-    ModelSpec(id="gemini-pro", label="Gemini Pro, latest (Google, cloud)", provider="gemini", name="gemini-pro-latest"),
-    ModelSpec(id="gemini-2.5-flash", label="Gemini 2.5 Flash (Google, cloud)", provider="gemini", name="gemini-2.5-flash"),
+    # Google Gemini (cloud). Google retires models often (the 2.5 family is already closed to new users), so add or
+    # replace entries through MODELS_CONFIG instead of editing code.
+    ModelSpec(id="gemini-3.5-flash-lite", label="Gemini 3.5 Flash-Lite (Google, cloud)", provider="gemini", name="gemini-3.5-flash-lite"),
     ModelSpec(id="extractive", label="No LLM (extractive, offline)", provider="extractive"),
 ]
 

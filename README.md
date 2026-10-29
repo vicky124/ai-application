@@ -37,7 +37,7 @@ pipeline is available as a streaming API: `POST /api/documents/ingest`. See the
 
 ## Model selection
 - **Config level:** `ModelSpec` list in [`backend/app/config.py`](backend/app/config.py), or a JSON file via `MODELS_CONFIG`
-  (`[{"id","label","provider","name","default"}]`). Defaults: Llama 3.1 8B, Qwen 2.5 7B, Mistral 7B (Ollama, local), three Google **Gemini** models (cloud) and an offline extractive mode.
+  (`[{"id","label","provider","name","default"}]`). Defaults: Llama 3.1 8B, Qwen 2.5 7B, Mistral 7B (Ollama, local), one Google **Gemini** model (cloud, `gemini-3.5-flash-lite`) and an offline extractive mode.
   Gemini needs `GOOGLE_API_KEY` in `backend/.env`; without it those options show as unavailable. **Gemini sends the question and retrieved
   passages to Google**, so use the local models for documents that must not leave your machine.
   Embeddings are fixed per collection (vector size), so they are chosen in config only (`EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`).
