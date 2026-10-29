@@ -106,19 +106,19 @@ FROM auth.audit_log ORDER BY id DESC LIMIT 20;
 
 ## Local cluster without Docker or admin rights
 
-How the development database on this project's machine was created (PostgreSQL 16 binaries installed, own data folder,
-port 5433). No Windows service and no superuser login are needed for the setup:
+A recipe for a local development cluster (PostgreSQL 16 binaries installed, own data folder, port 5433), as used on this
+project's machine. No Windows service is needed; the superuser password is only typed at the `initdb` prompt:
 
 ```powershell
 # 1. new cluster (you type the superuser password at the prompt)
 & 'C:\Program Files\PostgreSQL\16\bin\initdb.exe' -D C:\PostgreSQL16-data -U postgres -W -A scram-sha-256 -E UTF8
 # 2. choose the port
 Add-Content C:\PostgreSQL16-data\postgresql.conf "port = 5433"
-# 3. create the app role and databases offline, in single-user mode (statements end at newline)
-#    CREATE ROLE policy LOGIN PASSWORD 'policy'
-#    CREATE DATABASE policy_copilot OWNER policy
-#    CREATE DATABASE policy_test OWNER policy
+# 3. create the app role (single-user mode needs no superuser login), then start the server (step 4)
+#    CREATE ROLE policy LOGIN PASSWORD 'policy' CREATEDB
 #    fed to:  postgres.exe --single -D C:/PostgreSQL16-data postgres
+#    then, as the policy role (or postgres) against the running server:
+#    CREATE DATABASE policy_copilot;  CREATE DATABASE policy_test;
 # 4. start it
 & 'C:\Program Files\PostgreSQL\16\bin\pg_ctl.exe' start -D C:\PostgreSQL16-data -l C:\PostgreSQL16-data\server.log
 ```
@@ -126,6 +126,10 @@ Add-Content C:\PostgreSQL16-data\postgresql.conf "port = 5433"
 Then point the app at it in `backend/.env`:
 `DATABASE_URL=postgresql+psycopg://policy:policy@localhost:5433/policy_copilot`. A cluster started this way stops when the
 machine restarts; start it again with the last command, or register it as a service (needs admin).
+
+> **Create the databases with a normal `CREATE DATABASE` on the running server, not in single-user mode.** Databases made
+> in single-user mode right after `initdb` get internal IDs below 16384, which pgAdmin treats as system objects and hides
+> from its tree (they still work). This project's databases were recreated for that reason.
 
 ## Verification status
 
