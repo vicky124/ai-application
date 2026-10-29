@@ -42,7 +42,7 @@ Stack
 | Retrieval | LangChain `langchain-qdrant`, Qdrant (embedded local mode or server) |
 | Embeddings | FastEmbed, ONNX, `BAAI/bge-small-en-v1.5` (open source, local) |
 | LLMs | Ollama via `langchain-ollama` (Llama 3.1, Qwen 2.5, Mistral) or an offline extractive mode |
-| Frontend | React 18, Vite |
+| Frontend | React 18, Vite, Tailwind CSS 4 |
 | Auth | JWT (PyJWT), demo users |
 
 ```mermaid
@@ -528,21 +528,35 @@ lower scores, so tests set `MIN_RETRIEVAL_SCORE=0.15`.
 
 ## 12. Frontend
 
-React + Vite, no UI framework. In dev, Vite proxies `/api` and `/auth` to `http://localhost:8010`
-(`vite.config.js`).
+React 18 + Vite, styled with **Tailwind CSS 4** (`@tailwindcss/vite`). In dev, Vite proxies `/api` and `/auth` to
+`http://localhost:8010` (`vite.config.js`).
 
 | File | Role |
 |---|---|
-| `src/api.js` | `fetch` wrapper; keeps the JWT in `sessionStorage`; `login, logout, me, models, chat`. Errors carry the server `detail`. |
-| `src/App.jsx` | Session bootstrap (`/api/me` and `/api/models`), model dropdown, message list, composer, sign-out. |
-| `src/components/Login.jsx` | Login form with demo-user shortcuts. |
-| `src/components/IngestPage.jsx` | Ingestion tab (visible to admin, hr, compliance): upload form (title and ID auto-filled from the filename, department, version, role preset or custom roles, status), runs `api.ingest`, applies each streamed event to the step list, then refreshes the document list. |
-| `src/components/StepTimeline.jsx` | Renders the pipeline stages with status icons (pending, running, done, error), durations and expandable details: key/value rows, chunk preview cards, vector preview, JSON blocks. Failed stages open automatically. |
-| `src/components/DocumentsTable.jsx` | Indexed documents (title, ID, version, status, roles, chunk count) with delete. |
-| `src/components/Message.jsx` | Renders answers with clickable `[n]` citation chips, expandable source passages with score, verification badge, collapsible step trace, abstained styling. |
-| `src/styles.css` | Light/dark theme via CSS variables and `prefers-color-scheme`. |
+| `src/api.js` | `fetch` wrapper; keeps the JWT in `sessionStorage`; silent refresh on 401; `login, logout, me, models, chat, documents, ingest`. Errors carry the server `detail`. |
+| `src/index.css` | Tailwind entry, **theme tokens** (light and dark values), the `@theme` mapping to utilities, and a few reusable classes (`card`, `field`, `btn`, `btn-primary`, `btn-ghost`, `badge`) |
+| `src/theme.js` | `useTheme()` hook: light/dark state, persistence, system-preference following |
+| `src/App.jsx` | Session bootstrap (`/api/me` and `/api/models`), chat state, view switching |
+| `src/components/Header.jsx` | Sticky header: logo, Chat/Ingestion tabs (only with `documents:manage`), model picker (grouped local/cloud), cloud badge, user chip, theme toggle, sign-out |
+| `src/components/ThemeToggle.jsx` | Accessible dark/light switch (`role="switch"`, `aria-checked`) |
+| `src/components/Login.jsx` | Sign-in card with demo-account shortcuts, inline error, loading state |
+| `src/components/ChatView.jsx` | Empty state with suggested questions, message list, typing indicator, sticky composer |
+| `src/components/Message.jsx` | Answers with clickable `[n]` citation chips, expandable source passages with similarity bars, verified and model badges, collapsible step trace, abstained and error styling |
+| `src/components/IngestPage.jsx` | Ingestion tab: drag-and-drop upload form (title and ID auto-filled from the filename), runs `api.ingest`, applies each streamed event to the step list, refreshes the document list |
+| `src/components/StepTimeline.jsx` | Vertical timeline of the pipeline stages with status dots, durations and expandable details (key/value rows, chunk previews, vector preview). Failed stages open automatically |
+| `src/components/DocumentsTable.jsx` | Indexed documents with status and role badges and delete; scrolls horizontally on small screens |
+| `src/components/icons.jsx` | Inline SVG icon set (no icon dependency) |
 
 The token lives in `sessionStorage` (cleared when the tab closes). Chat history is held in component state only.
+
+### Theming
+- **Class-based dark mode.** Tailwind's `dark:` variant is bound to a `dark` class on `<html>` (`@custom-variant dark` in `index.css`).
+- **Semantic tokens, not raw colors.** Every color is a CSS variable defined twice in `index.css` (`:root` for light, `.dark` for dark) and exposed to Tailwind through `@theme inline` (`bg-surface`, `text-muted`, `border-border`, `bg-accent`, `bg-success-soft`, ...). Components never use hard-coded palette colors, so a theme is just a set of token values and a new theme (or brand color change) is a CSS-only edit.
+- **Toggle behavior.** The header (and the sign-in page) has a light/dark switch. The first visit follows the operating-system setting (`prefers-color-scheme`) and keeps following it until the user flips the switch; the choice is then saved in `localStorage` (`theme`). If storage is blocked the toggle still works for the session.
+- **No flash on load.** A tiny inline script in `index.html` applies the saved or system theme before first paint.
+- **Native controls follow the theme** through `color-scheme` (scrollbars, selects, date pickers).
+- **Accessibility.** Visible keyboard focus rings, `aria-*` on toggles, expanders and alerts, `prefers-reduced-motion` support, text colors chosen for readable contrast in both themes.
+- **Responsive.** The header reflows to three compact rows on phones, tables scroll inside their card, and no page-level horizontal scroll (checked at 375 px).
 
 ## 13. Extending the system
 

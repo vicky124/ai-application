@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "../api.js";
 import DocumentsTable from "./DocumentsTable.jsx";
+import { Alert, Check, Spinner, Upload } from "./icons.jsx";
 import StepTimeline from "./StepTimeline.jsx";
 
 const ROLE_PRESETS = [
@@ -17,6 +18,17 @@ const slug = (s) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
 
+const kb = (bytes) => (bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`);
+
+function Field({ label, children, className = "" }) {
+  return (
+    <label className={`block space-y-1.5 ${className}`}>
+      <span className="text-sm font-medium">{label}</span>
+      {children}
+    </label>
+  );
+}
+
 export default function IngestPage() {
   const [file, setFile] = useState(null);
   const [form, setForm] = useState({ title: "", doc_id: "", department: "General", version: "1.0", status: "active" });
@@ -27,6 +39,7 @@ export default function IngestPage() {
   const [running, setRunning] = useState(false);
   const [formError, setFormError] = useState("");
   const [docs, setDocs] = useState(null);
+  const [dragging, setDragging] = useState(false);
 
   const loadDocs = useCallback(() => api.documents().then(setDocs).catch(() => setDocs([])), []);
   useEffect(() => {
@@ -88,71 +101,126 @@ export default function IngestPage() {
   }
 
   return (
-    <div className="ingest">
-      <section>
-        <h2>Ingest a document</h2>
-        <form onSubmit={run} className="ingest-form">
-          <label className="wide">
-            File
-            <input type="file" accept=".md,.txt,.pdf" onChange={(e) => pickFile(e.target.files[0] || null)} />
+    <main className="mx-auto w-full max-w-5xl flex-1 space-y-6 px-4 py-6">
+      <div>
+        <h2 className="text-xl font-semibold tracking-tight">Document ingestion</h2>
+        <p className="mt-1 text-sm text-muted">
+          Upload a policy document and watch it move through parsing, chunking, embedding and indexing.
+        </p>
+      </div>
+
+      <section className="card p-5 sm:p-6">
+        <form onSubmit={run} className="grid gap-4 sm:grid-cols-2">
+          <label
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragging(true);
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragging(false);
+              pickFile(e.dataTransfer.files[0] || null);
+            }}
+            className={`flex cursor-pointer flex-col items-center gap-1.5 rounded-xl border-2 border-dashed px-4 py-8 text-center transition-colors focus-within:border-ring sm:col-span-2 ${
+              dragging ? "border-ring bg-accent-soft" : "border-border hover:border-ring/60 hover:bg-surface-2"
+            }`}
+          >
+            <Upload className="size-6 text-accent-text" />
+            {file ? (
+              <>
+                <span className="text-sm font-medium">{file.name}</span>
+                <span className="text-xs text-muted">{kb(file.size)} · click or drop to replace</span>
+              </>
+            ) : (
+              <>
+                <span className="text-sm font-medium">Drop a file here or click to browse</span>
+                <span className="text-xs text-muted">.md, .txt or .pdf</span>
+              </>
+            )}
+            <input type="file" accept=".md,.txt,.pdf" className="sr-only" onChange={(e) => pickFile(e.target.files[0] || null)} />
           </label>
-          <label>
-            Title
-            <input value={form.title} onChange={update("title")} required />
-          </label>
-          <label>
-            Document ID
-            <input value={form.doc_id} onChange={update("doc_id")} required pattern="[a-z0-9][a-z0-9_\-]{1,60}" title="lowercase letters, digits, - or _" />
-          </label>
-          <label>
-            Department
-            <input value={form.department} onChange={update("department")} />
-          </label>
-          <label>
-            Version
-            <input value={form.version} onChange={update("version")} />
-          </label>
-          <label>
-            Who can read it
-            <select value={preset} onChange={(e) => setPreset(e.target.value)}>
+
+          <Field label="Title">
+            <input className="field" value={form.title} onChange={update("title")} required />
+          </Field>
+          <Field label="Document ID">
+            <input
+              className="field font-mono"
+              value={form.doc_id}
+              onChange={update("doc_id")}
+              required
+              pattern="[a-z0-9][a-z0-9_\-]{1,60}"
+              title="lowercase letters, digits, - or _"
+            />
+          </Field>
+          <Field label="Department">
+            <input className="field" value={form.department} onChange={update("department")} />
+          </Field>
+          <Field label="Version">
+            <input className="field" value={form.version} onChange={update("version")} />
+          </Field>
+          <Field label="Who can read it">
+            <select className="field cursor-pointer" value={preset} onChange={(e) => setPreset(e.target.value)}>
               {ROLE_PRESETS.map((p) => (
-                <option key={p.value} value={p.value}>{p.label}</option>
+                <option key={p.value} value={p.value}>
+                  {p.label}
+                </option>
               ))}
             </select>
-          </label>
-          {preset === "custom" && (
-            <label>
-              Roles (comma separated)
-              <input value={custom} onChange={(e) => setCustom(e.target.value)} />
-            </label>
-          )}
-          <label>
-            Status
-            <select value={form.status} onChange={update("status")}>
+          </Field>
+          {preset === "custom" ? (
+            <Field label="Roles (comma separated)">
+              <input className="field" value={custom} onChange={(e) => setCustom(e.target.value)} />
+            </Field>
+          ) : null}
+          <Field label="Status">
+            <select className="field cursor-pointer" value={form.status} onChange={update("status")}>
               <option value="active">active (searchable)</option>
               <option value="draft">draft</option>
               <option value="inactive">inactive</option>
             </select>
-          </label>
-          <div className="wide">
-            <button disabled={running}>{running ? "Running pipeline…" : "Run ingestion pipeline"}</button>
-            {formError && <span className="error"> {formError}</span>}
+          </Field>
+
+          <div className="flex flex-wrap items-center gap-3 sm:col-span-2">
+            <button className="btn-primary" disabled={running}>
+              {running ? <Spinner /> : null}
+              {running ? "Running pipeline…" : "Run ingestion pipeline"}
+            </button>
+            {formError && (
+              <span role="alert" className="inline-flex items-center gap-1.5 text-sm text-danger">
+                <Alert className="size-4" /> {formError}
+              </span>
+            )}
           </div>
         </form>
       </section>
 
       {steps.length > 0 && (
-        <section>
-          <h2>Pipeline steps</h2>
+        <section className="card p-5 sm:p-6">
+          <h3 className="mb-4 text-base font-semibold">Pipeline steps</h3>
           <StepTimeline steps={steps} />
-          {outcome && <p className={outcome.ok ? "ok" : "error"}>{outcome.text}</p>}
+          {outcome && (
+            <p
+              role="status"
+              className={`mt-5 flex items-center gap-2 rounded-xl px-3.5 py-2.5 text-sm font-medium ${
+                outcome.ok ? "bg-success-soft text-success" : "bg-danger-soft text-danger"
+              }`}
+            >
+              {outcome.ok ? <Check className="size-4" /> : <Alert className="size-4" />}
+              {outcome.text}
+            </p>
+          )}
         </section>
       )}
 
-      <section>
-        <h2>Indexed documents</h2>
+      <section className="card overflow-hidden">
+        <div className="flex items-center justify-between px-5 pb-3 pt-5 sm:px-6">
+          <h3 className="text-base font-semibold">Indexed documents</h3>
+          {docs && <span className="badge bg-surface-2 text-muted">{docs.length}</span>}
+        </div>
         <DocumentsTable docs={docs} onDelete={remove} />
       </section>
-    </div>
+    </main>
   );
 }

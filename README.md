@@ -28,6 +28,11 @@ after repeated failures; every security event is audited. REST endpoints: `/auth
 and `/api/me|users|roles|audit-log` (interactive docs at http://localhost:8010/docs). Details in the
 [implementation guide](docs/implementation.md#7a-identity-authentication-and-authorization).
 
+## UI and theming
+The React UI is styled with Tailwind CSS and has a **dark/light toggle** in the header (first visit follows your system setting, then your choice is
+remembered). All colors are semantic theme tokens in `frontend/src/index.css`, so restyling or adding a theme is a CSS-only change. The layout is
+responsive down to phone width. Details in the [implementation guide](docs/implementation.md#12-frontend).
+
 ## Ingestion pipeline with live steps
 HR, compliance and admin users get an **Ingestion** tab. Upload a `.md`, `.txt` or `.pdf` file and watch seven stages
 run: receive, parse, clean, chunk, embed, store in Qdrant, verify. Each stage shows its details (chunk previews,

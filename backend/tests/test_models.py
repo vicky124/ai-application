@@ -117,6 +117,7 @@ def test_api_chat_end_to_end_through_a_fake_gemini(client, alice, monkeypatch):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["model_id"] == "gemini-3.5-flash-lite" and not body["abstained"]
+    assert body["model_local"] is False  # the UI flags answers produced by cloud models
     assert body["verification"]["passed"] is True and body["sources"][0]["title"] == "Leave Policy"
     listed = {m["id"]: m for m in client.get("/api/models", headers=alice).json()["models"]}
     assert listed["gemini-3.5-flash-lite"]["available"] is True  # the key now makes it selectable

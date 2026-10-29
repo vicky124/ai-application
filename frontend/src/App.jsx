@@ -1,28 +1,25 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "./api.js";
+import { useTheme } from "./theme.js";
+import ChatView from "./components/ChatView.jsx";
+import Header from "./components/Header.jsx";
 import IngestPage from "./components/IngestPage.jsx";
 import Login from "./components/Login.jsx";
-import Message from "./components/Message.jsx";
 
 export default function App() {
+  const { theme, toggle } = useTheme();
   const [user, setUser] = useState(null);
   const [models, setModels] = useState([]);
   const [modelId, setModelId] = useState("");
   const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [view, setView] = useState("chat");
-  const endRef = useRef(null);
   const canIngest = Boolean(user?.permissions?.includes("documents:manage"));
   const selectedModel = models.find((m) => m.id === modelId);
 
   useEffect(() => {
     if (api.hasToken()) loadSession().catch(() => api.logout());
   }, []);
-
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, busy]);
 
   async function loadSession() {
     const [me, m] = await Promise.all([api.me(), api.models()]);
@@ -32,11 +29,8 @@ export default function App() {
     setModelId(usable ? usable.id : m.default);
   }
 
-  async function send(e) {
-    e.preventDefault();
-    const question = input.trim();
+  async function ask(question) {
     if (!question || busy) return;
-    setInput("");
     setMessages((prev) => [...prev, { role: "user", text: question }]);
     setBusy(true);
     try {
@@ -59,6 +53,8 @@ export default function App() {
   if (!user) {
     return (
       <Login
+        theme={theme}
+        onToggleTheme={toggle}
         onLogin={async (u, p) => {
           await api.login(u, p);
           await loadSession();
@@ -68,82 +64,25 @@ export default function App() {
   }
 
   return (
-    <div className="app">
-      <header>
-        <h1>Policy &amp; HR Copilot</h1>
-        {canIngest && (
-          <nav className="tabs">
-            <button className={view === "chat" ? "tab active" : "tab"} onClick={() => setView("chat")}>Chat</button>
-            <button className={view === "ingest" ? "tab active" : "tab"} onClick={() => setView("ingest")}>Ingestion</button>
-          </nav>
-        )}
-        <div className="controls">
-          {view === "chat" && (
-            <label>
-              Model{" "}
-              <select value={modelId} onChange={(e) => setModelId(e.target.value)}>
-                {[
-                  ["Local (open source, stays on this machine)", models.filter((m) => m.local)],
-                  ["Cloud (retrieved text is sent to the provider)", models.filter((m) => !m.local)],
-                ]
-                  .filter(([, group]) => group.length > 0)
-                  .map(([title, group]) => (
-                    <optgroup key={title} label={title}>
-                      {group.map((m) => (
-                        <option key={m.id} value={m.id} disabled={!m.available}>
-                          {m.label}
-                          {!m.available ? ` — unavailable: ${m.unavailable_reason}` : ""}
-                        </option>
-                      ))}
-                    </optgroup>
-                  ))}
-              </select>
-            </label>
-          )}
-          {view === "chat" && selectedModel && !selectedModel.local && (
-            <span className="cloud" title="Retrieved policy passages and your question are sent to the model provider">
-              cloud model
-            </span>
-          )}
-          <span className="user">
-            {user.name} · {user.role}
-          </span>
-          <button className="link" onClick={signOut}>
-            Sign out
-          </button>
-        </div>
-      </header>
-
-      {view === "ingest" && canIngest && <IngestPage />}
-
-      {view === "chat" && (<>
-      <main>
-        {messages.length === 0 && (
-          <p className="hint">
-            Ask about leave, code of conduct, IT policy or onboarding. Answers cite approved documents only.
-          </p>
-        )}
-        {messages.map((m, i) => (
-          <Message key={i} m={m} />
-        ))}
-        {busy && (
-          <div className="msg assistant">
-            <em>Searching policies…</em>
-          </div>
-        )}
-        <div ref={endRef} />
-      </main>
-
-      <form onSubmit={send} className="composer">
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask a policy question…"
-          autoFocus
-        />
-        <button disabled={busy || !input.trim()}>Send</button>
-      </form>
-      </>)}
+    <div className="flex min-h-dvh flex-col">
+      <Header
+        user={user}
+        view={view}
+        onView={setView}
+        canIngest={canIngest}
+        models={models}
+        modelId={modelId}
+        onModel={setModelId}
+        selectedModel={selectedModel}
+        theme={theme}
+        onToggleTheme={toggle}
+        onSignOut={signOut}
+      />
+      {view === "ingest" && canIngest ? (
+        <IngestPage />
+      ) : (
+        <ChatView messages={messages} busy={busy} onAsk={ask} user={user} />
+      )}
     </div>
   );
 }
