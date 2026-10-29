@@ -107,7 +107,7 @@ def test_api_chat_end_to_end_through_a_fake_gemini(client, alice, monkeypatch):
     from app.config import settings as app_settings
 
     class FakeGemini:
-        def generate(self, question, sources):
+        def generate(self, question, sources, feedback=None):
             return f"Employees receive 10 days of paid sick leave per year [1]."
 
     container = get_container()
@@ -127,7 +127,7 @@ def test_api_provider_failure_does_not_leak_details(client, alice, monkeypatch):
     from app.config import settings as app_settings
 
     class Exploding:
-        def generate(self, question, sources):
+        def generate(self, question, sources, feedback=None):
             raise RuntimeError("quota exceeded for key AIza-SECRET-VALUE")
 
     monkeypatch.setattr(app_settings, "google_api_key", "fake-key")

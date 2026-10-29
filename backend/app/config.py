@@ -67,6 +67,13 @@ class Settings(BaseSettings):
     min_rerank_score: float = 0.001
     min_citation_coverage: float = 0.6
     max_generation_attempts: int = 2
+    # Groundedness verification: "rules" (citations and numbers only), "claims" (plus offline claim-by-claim checks of
+    # each sentence against the sources it cites) or "llm" (an LLM judges each claim; falls back to the offline
+    # checks when the model is unavailable). See docs/phase2-verifier-evaluation.md for the measurements.
+    verifier_mode: str = "claims"
+    verifier_model_id: str = "gemini-3.5-flash-lite"  # used when verifier_mode is "llm"
+    verifier_min_lexical: float = 0.5
+    verifier_min_cross_encoder: float = 0.01
     chunk_size: int = 900
     chunk_overlap: int = 150
 

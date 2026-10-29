@@ -23,6 +23,7 @@ def parse_configs(text: str, args) -> list[StackConfig]:
                 model_id=args.model,
                 top_k=args.top_k,
                 fetch_k=args.fetch_k,
+                verifier=args.verifier,
                 min_score=args.min_score,
             )
         )
@@ -35,6 +36,7 @@ def main() -> int:
     p.add_argument("--model", default="extractive", help="model id from the catalog (extractive needs no LLM)")
     p.add_argument("--embedding", default="fastembed", choices=["fastembed", "hash"])
     p.add_argument("--top-k", type=int, default=5)
+    p.add_argument("--verifier", default="rules", choices=["rules", "claims", "llm"], help="groundedness verifier mode")
     p.add_argument("--fetch-k", type=int, default=10, help="candidates handed to the reranker")
     p.add_argument("--min-score", type=float, default=None, help="override the relevance threshold for every configuration")
     p.add_argument("--category", action="append", help="only run these categories (repeatable)")

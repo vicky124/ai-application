@@ -26,6 +26,7 @@ class AgentState(TypedDict, total=False):
     attempts: int
     abstained: bool
     abstain_reason: str
+    feedback: str | None
     trace: list[str]
 
 
@@ -62,15 +63,24 @@ class PolicyAgent:
 
     def _generate_node(self, s: AgentState) -> AgentState:
         attempts = s.get("attempts", 0) + 1
-        answer = self._resolve(s.get("model_id")).generate(s["question"], s["sources"])
-        return {"answer": answer, "attempts": attempts, "trace": s["trace"] + [f"generate: attempt {attempts}"]}
+        feedback = s.get("feedback")  # what the verifier objected to in the previous attempt, if any
+        answer = self._resolve(s.get("model_id")).generate(s["question"], s["sources"], feedback=feedback)
+        note = f"generate: attempt {attempts}" + (" (retry with verifier feedback)" if feedback else "")
+        return {"answer": answer, "attempts": attempts, "trace": s["trace"] + [note]}
 
     def _verify_node(self, s: AgentState) -> AgentState:
         v = self._verifier.verify(s["answer"], s["sources"])
-        return {"verification": v, "trace": s["trace"] + [f"verify: {'pass' if v.passed else 'fail'} ({v.reason})"]}
+        conf = f", confidence {v.confidence:.2f}" if v.confidence is not None else ""
+        return {
+            "verification": v,
+            "feedback": None if v.passed else v.hint,
+            "trace": s["trace"] + [f"verify: {'pass' if v.passed else 'fail'} ({v.reason}{conf})"],
+        }
 
     def _abstain_node(self, s: AgentState) -> AgentState:
-        reason = s.get("abstain_reason") or "answer could not be verified"
+        v = s.get("verification")
+        failed = f"answer could not be verified: {v.reason}" if v is not None and not v.passed else None
+        reason = s.get("abstain_reason") or failed or "answer could not be verified"
         return {"answer": ABSTAIN_TEXT, "abstained": True, "abstain_reason": reason}
 
     # ---- routing ----

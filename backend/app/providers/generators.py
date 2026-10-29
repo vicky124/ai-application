@@ -42,20 +42,22 @@ class LangChainGenerator:
     def __init__(self, chat_model):
         self._chat = chat_model
 
-    def generate(self, question: str, sources: list[Source]) -> str:
-        msg = self._chat.invoke(
-            [
-                ("system", SYSTEM_PROMPT),
-                ("human", f"Sources:\n{format_sources(sources)}\n\nQuestion: {question}"),
-            ]
-        )
+    def generate(self, question: str, sources: list[Source], feedback: str | None = None) -> str:
+        human = "Sources:\n" + format_sources(sources) + "\n\nQuestion: " + question
+        if feedback:
+            human += "\n\n" + feedback
+        return self.complete(SYSTEM_PROMPT, human)
+
+    def complete(self, system: str, human: str) -> str:
+        """One plain chat round trip; also used by the LLM claim judge."""
+        msg = self._chat.invoke([("system", system), ("human", human)])
         return content_text(msg.content)
 
 
 class ExtractiveGenerator:
     """No-LLM fallback: returns the best-matching sentences from the top sources, with citations."""
 
-    def generate(self, question: str, sources: list[Source]) -> str:
+    def generate(self, question: str, sources: list[Source], feedback: str | None = None) -> str:
         q_terms = set(re.findall(r"[a-z0-9]+", question.lower())) - {"the", "a", "an", "is", "are", "of", "to", "how", "what", "do", "i", "my", "for", "and", "in"}
         scored = []
         for idx, s in enumerate(sources[:3], 1):

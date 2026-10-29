@@ -33,15 +33,15 @@ class CitationVerifier:
             return Verification(True, "model abstained")
         cited = [int(n) for n in _CITE.findall(answer)]
         if not cited:
-            return Verification(False, "no citations")
+            return Verification(False, "no citations", hint="Cite the supporting source like [1] after every sentence.")
         if any(n < 1 or n > len(sources) for n in cited):
-            return Verification(False, "citation refers to a non-existent source")
+            return Verification(False, "citation refers to a non-existent source", hint=f"Cite only the provided sources, [1] to [{len(sources)}].")
         sentences = [s for s in re.split(r"(?<=[.!?])\s+|\n+", answer) if s.strip()]
         coverage = sum(1 for s in sentences if _CITE.search(s)) / max(len(sentences), 1)
         if coverage < self._min:
-            return Verification(False, "too many uncited sentences", coverage)
+            return Verification(False, "too many uncited sentences", coverage, hint="Cite a source like [1] after every sentence.")
         corpus = " ".join(s.text for s in sources)
         for num in _NUM.findall(_CITE.sub("", answer)):
             if num not in corpus:
-                return Verification(False, f"number {num} not found in sources", coverage)
+                return Verification(False, f"number {num} not found in sources", coverage, hint=f"The number {num} does not appear in the sources; use only figures stated in them.")
         return Verification(True, "grounded", coverage)

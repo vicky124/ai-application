@@ -88,7 +88,20 @@ def chat(body: ChatRequest, user: CurrentUser = Depends(ChatUser), c: Container 
         "model_id": model_id,
         "model_local": next(c.models.describe(m)["local"] for m in c.models.specs() if m.id == model_id),
         "sources": [s.__dict__ for s in state.get("sources", [])] if not state["abstained"] else [],
-        "verification": {"passed": v.passed, "reason": v.reason, "coverage": v.coverage} if v else None,
+        "verification": (
+            {
+                "passed": v.passed,
+                "reason": v.reason,
+                "coverage": v.coverage,
+                "confidence": v.confidence,
+                "claims": [
+                    {"claim": c.claim, "cited": list(c.cited), "verdict": c.verdict, "strength": c.strength, "reason": c.reason}
+                    for c in v.claims
+                ],
+            }
+            if v
+            else None
+        ),
         "trace": state["trace"],
     }
 

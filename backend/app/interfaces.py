@@ -4,7 +4,7 @@ from typing import Protocol
 
 from langchain_core.documents import Document
 
-from app.domain import GuardResult, ParsedPage, Source, Verification
+from app.domain import Claim, ClaimCheck, GuardResult, ParsedPage, Source, Verification
 
 # A sparse vector as (indices, values), for keyword-style (BM25 / SPLADE) retrieval.
 SparseVec = tuple[list[int], list[float]]
@@ -51,7 +51,15 @@ class Reranker(Protocol):
 class AnswerGenerator(Protocol):
     """Produces a cited answer from sources; returns INSUFFICIENT_CONTEXT when it cannot answer."""
 
-    def generate(self, question: str, sources: list[Source]) -> str: ...
+    def generate(self, question: str, sources: list[Source], feedback: str | None = None) -> str:
+        """`feedback` describes what was wrong with a previous attempt (set on retries)."""
+        ...
+
+
+class ClaimChecker(Protocol):
+    """Judges, claim by claim, whether the cited sources support what the answer says."""
+
+    def check(self, claims: list[Claim], sources: list[Source]) -> list[ClaimCheck]: ...
 
 
 class Verifier(Protocol):

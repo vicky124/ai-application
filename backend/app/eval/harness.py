@@ -17,11 +17,12 @@ class StackConfig:
     model_id: str = "extractive"
     top_k: int = 5
     fetch_k: int = 10  # candidates passed to the reranker
+    verifier: str = "rules"  # rules | claims | llm (the application default is claims)
     min_score: float | None = None  # relevance threshold; None keeps the application's default for this configuration
 
     @property
     def label(self) -> str:
-        return f"{self.retrieval}+{self.rerank}"
+        return f"{self.retrieval}+{self.rerank}" + ("" if self.verifier == "rules" else f"+{self.verifier}")
 
 
 class Stack:
@@ -38,6 +39,7 @@ class Stack:
             autoload_samples=False,
             retrieval_mode=cfg.retrieval,
             reranker_provider=cfg.rerank,
+            verifier_mode=cfg.verifier,
         )
         if cfg.min_score is not None:
             overrides["min_retrieval_score"] = cfg.min_score

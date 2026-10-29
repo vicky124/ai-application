@@ -16,7 +16,8 @@ Built on open-source models: local embeddings via FastEmbed and LLMs served by O
 ## Documentation
 - [Implementation guide](docs/implementation.md): architecture, modules, agent flow, API and config reference, extension guides, testing, limitations
 - [Requirements analysis](docs/requirements-analysis.md)
-- [Phase 2 retrieval evaluation](docs/phase2-retrieval-evaluation.md): golden set, ablation results, decisions, limits: scope, requirements, phases
+- [Phase 2 retrieval evaluation](docs/phase2-retrieval-evaluation.md): golden set, ablation results, decisions, limits
+- [Phase 2 verifier evaluation](docs/phase2-verifier-evaluation.md): claim-level groundedness checks, held-out measurements, limits: scope, requirements, phases
 
 ## Status
 **Phase 1 (foundation) done:** ingestion, RAG with citations, abstention, RBAC, model selection, React chat UI.
@@ -27,6 +28,12 @@ A 60-case golden set measures retrieval and the answer-or-refuse decision (`pyth
 overall pass rate from 81.7% to 95.0% and correct refusals from 50% to 93%; hybrid (BM25) search showed no gain on this small corpus, so it is
 opt-in. Method, results and limits: [docs/phase2-retrieval-evaluation.md](docs/phase2-retrieval-evaluation.md).
 Existing Phase 1 data can be migrated with `python -m app.rag.manage reindex`.
+
+## Groundedness verification
+Each sentence of an answer is checked against the sources it cites (`VERIFIER_MODE`): offline by default, with an optional LLM judge. On 40 held-out answers the
+previous rule-only check caught 5% of faulty answers, the offline claim checks 40% (10% false alarms) and the LLM judge 100% (0% false alarms, about 17 s per answer).
+Failures produce a retry with feedback, and the UI shows a confidence band and a per-claim check list. The numbers, including why the first results were optimistic, are in
+[docs/phase2-verifier-evaluation.md](docs/phase2-verifier-evaluation.md).
 
 ## Authentication and authorization
 Users, roles and sessions are stored in PostgreSQL (schema `auth`). Roles carry an access **level** and a set of
@@ -102,7 +109,7 @@ Optional services (Qdrant server, Ollama): `docker compose up -d`, then set `QDR
 ## Tests
 ```bash
 cd backend
-.venv/Scripts/python -m pytest        # 98 tests; uses SQLite unless TEST_DATABASE_URL points to Postgres
+.venv/Scripts/python -m pytest        # 144 tests; uses SQLite unless TEST_DATABASE_URL points to Postgres
 ```
 
 ## Layout

@@ -1,0 +1,67 @@
+{
+  "description": "Labeled answers for measuring the groundedness verifier. Each case has an answer (with [n] citations), the sources it cites (resolved from the corpus by document and section), and whether every claim is supported. 'faithful' answers are paraphrases that must pass; every other fault type must fail. Cases are split into dev (calibration) and test (held out) by position in this file.",
+  "cases": [
+    {"id": "f01", "fault": "faithful", "supported": true, "answer": "You get 24 days of paid annual leave each calendar year [1].", "sources": [{"doc": "leave-policy", "section": "Annual Leave"}]},
+    {"id": "f02", "fault": "faithful", "supported": true, "answer": "Up to 5 unused days can be carried into the next year, and the rest expire on 31 March [1].", "sources": [{"doc": "leave-policy", "section": "Annual Leave"}]},
+    {"id": "f03", "fault": "faithful", "supported": true, "answer": "A medical certificate is needed only when you are absent for more than 2 consecutive days [1].", "sources": [{"doc": "leave-policy", "section": "Sick Leave"}]},
+    {"id": "f04", "fault": "faithful", "supported": true, "answer": "Secondary caregivers get 4 weeks of paid parental leave, taken within 12 months of the birth or adoption [1].", "sources": [{"doc": "leave-policy", "section": "Parental Leave"}]},
+    {"id": "f05", "fault": "faithful", "supported": true, "answer": "Request annual leave in the HR portal at least 5 working days ahead [1]. Your manager responds within 2 working days [1].", "sources": [{"doc": "leave-policy", "section": "How to Apply"}]},
+    {"id": "f06", "fault": "faithful", "supported": true, "answer": "Gifts above 50 USD from vendors must be declined or reported to Compliance within 5 working days [1].", "sources": [{"doc": "code-of-conduct", "section": "Gifts and Hospitality"}]},
+    {"id": "f07", "fault": "faithful", "supported": true, "answer": "Concerns can go to your manager, HR or the ethics hotline, and you may stay anonymous [1]. Retaliation for good-faith reports is prohibited [2].", "sources": [{"doc": "code-of-conduct", "section": "Reporting Concerns"}, {"doc": "whistleblower-policy", "section": "Protection"}]},
+    {"id": "f08", "fault": "faithful", "supported": true, "answer": "Passwords need at least 14 characters and must be changed every 180 days [1].", "sources": [{"doc": "it-acceptable-use", "section": "Passwords and Access"}]},
+    {"id": "f09", "fault": "faithful", "supported": true, "answer": "Laptops lock their screen automatically after 5 minutes of inactivity [1].", "sources": [{"doc": "it-acceptable-use", "section": "Devices"}]},
+    {"id": "f10", "fault": "faithful", "supported": true, "answer": "Send HR your government ID, signed offer letter and bank details at least 3 working days before you start [1].", "sources": [{"doc": "onboarding-guide", "section": "Before Day One"}]},
+    {"id": "f11", "fault": "faithful", "supported": true, "answer": "Probation lasts 90 days, with manager reviews at day 45 and day 90 [1].", "sources": [{"doc": "onboarding-guide", "section": "Probation"}]},
+    {"id": "f12", "fault": "faithful", "supported": true, "answer": "You can claim up to 40 USD per day for meals when travelling, and you need a receipt for any claim above 10 USD [1].", "sources": [{"doc": "travel-expense-policy", "section": "Meals"}]},
+    {"id": "f13", "fault": "faithful", "supported": true, "answer": "Hotels are capped at 180 USD per night, or 250 USD in New York, London and Tokyo [1].", "sources": [{"doc": "travel-expense-policy", "section": "Flights and Hotels"}]},
+    {"id": "f14", "fault": "faithful", "supported": true, "answer": "Using your own car for business travel is reimbursed at 0.58 USD per mile [1].", "sources": [{"doc": "travel-expense-policy", "section": "Mileage"}]},
+    {"id": "f15", "fault": "faithful", "supported": true, "answer": "After probation you may work remotely up to 3 days a week, and your manager approves the schedule [1].", "sources": [{"doc": "remote-work-policy", "section": "Eligibility"}]},
+    {"id": "f16", "fault": "faithful", "supported": true, "answer": "Working from another country for more than 14 days a year needs approval from HR and Legal [1].", "sources": [{"doc": "remote-work-policy", "section": "Working Abroad"}]},
+    {"id": "f17", "fault": "faithful", "supported": true, "answer": "Customer personal data is kept for 24 months after the relationship ends, then deleted or anonymised [1].", "sources": [{"doc": "data-privacy-policy", "section": "Retention"}]},
+    {"id": "f18", "fault": "faithful", "supported": true, "answer": "Report suspected breaches to the Data Protection Officer within 24 hours [1]. Regulators are notified within 72 hours when the law requires it [1].", "sources": [{"doc": "data-privacy-policy", "section": "Breach Reporting"}]},
+    {"id": "f19", "fault": "faithful", "supported": true, "answer": "Health insurance covers you, your spouse and dependent children from your first day [1].", "sources": [{"doc": "benefits-guide", "section": "Health Insurance"}]},
+    {"id": "f20", "fault": "faithful", "supported": true, "answer": "You have 1,000 USD a year for learning, and manager approval is needed above 500 USD [1].", "sources": [{"doc": "benefits-guide", "section": "Learning Budget"}]},
+    {"id": "f21", "fault": "faithful", "supported": true, "answer": "A P1 incident needs a response within 15 minutes, while P2 allows 4 hours [1].", "sources": [{"doc": "security-incident-response", "section": "Severity Levels"}]},
+    {"id": "f22", "fault": "faithful", "supported": true, "answer": "Reviews are held twice a year, in June and December, using a rating scale from 1 to 5 [1].", "sources": [{"doc": "performance-review-guide", "section": "Cycle"}]},
+    {"id": "f23", "fault": "faithful", "supported": true, "answer": "Compliance acknowledges a report within 3 working days and aims to finish investigating within 45 days [1].", "sources": [{"doc": "whistleblower-policy", "section": "Investigation"}]},
+    {"id": "f24", "fault": "faithful", "supported": true, "answer": "Use form HR-204 to request parental leave and form FIN-17 to claim expenses [1].", "sources": [{"doc": "forms-and-codes", "section": "Forms"}]},
+    {"id": "f25", "fault": "faithful", "supported": true, "answer": "Report a lost device within 1 hour of discovery [1]. Do not power an affected device off, so that evidence is preserved [2].", "sources": [{"doc": "it-acceptable-use", "section": "Reporting Incidents"}, {"doc": "security-incident-response", "section": "Containment"}]},
+    {"id": "f26", "fault": "faithful", "supported": true, "answer": "You get 10 days of paid sick leave a year, and it cannot be carried forward [1].", "sources": [{"doc": "leave-policy", "section": "Sick Leave"}]},
+
+    {"id": "n01", "fault": "wrong_number", "supported": false, "answer": "You get 30 days of paid annual leave per calendar year [1].", "sources": [{"doc": "leave-policy", "section": "Annual Leave"}]},
+    {"id": "n02", "fault": "wrong_number", "supported": false, "answer": "Up to 10 unused days can be carried forward [1].", "sources": [{"doc": "leave-policy", "section": "Annual Leave"}]},
+    {"id": "n03", "fault": "wrong_number", "supported": false, "answer": "Passwords must be at least 12 characters [1].", "sources": [{"doc": "it-acceptable-use", "section": "Passwords and Access"}]},
+    {"id": "n04", "fault": "wrong_number", "supported": false, "answer": "Meals are reimbursed up to 60 USD per day [1].", "sources": [{"doc": "travel-expense-policy", "section": "Meals"}]},
+    {"id": "n05", "fault": "wrong_number", "supported": false, "answer": "You may work remotely up to 4 days per week [1].", "sources": [{"doc": "remote-work-policy", "section": "Eligibility"}]},
+    {"id": "n06", "fault": "wrong_number", "supported": false, "answer": "Customer data is kept for 36 months after the relationship ends [1].", "sources": [{"doc": "data-privacy-policy", "section": "Retention"}]},
+
+    {"id": "x01", "fault": "fabricated_claim", "supported": false, "answer": "You get 24 days of paid annual leave, plus a birthday day off [1].", "sources": [{"doc": "leave-policy", "section": "Annual Leave"}]},
+    {"id": "x02", "fault": "fabricated_claim", "supported": false, "answer": "Gifts above 50 USD must be declined, and violations lead to dismissal without notice [1].", "sources": [{"doc": "code-of-conduct", "section": "Gifts and Hospitality"}]},
+    {"id": "x03", "fault": "fabricated_claim", "supported": false, "answer": "Remote employees also receive a standing desk reimbursement [1].", "sources": [{"doc": "remote-work-policy", "section": "Equipment and Allowance"}]},
+    {"id": "x04", "fault": "fabricated_claim", "supported": false, "answer": "The company matches retirement contributions up to 5 percent and also offers stock options [1].", "sources": [{"doc": "benefits-guide", "section": "Retirement"}]},
+    {"id": "x05", "fault": "fabricated_claim", "supported": false, "answer": "Health insurance covers you and your family, including international travel cover [1].", "sources": [{"doc": "benefits-guide", "section": "Health Insurance"}]},
+    {"id": "x06", "fault": "fabricated_claim", "supported": false, "answer": "A P1 incident needs a response within 15 minutes and is escalated to the CEO [1].", "sources": [{"doc": "security-incident-response", "section": "Severity Levels"}]},
+
+    {"id": "e01", "fault": "extra_sentence", "supported": false, "answer": "Leave requests go through the HR portal [1]. Requests are automatically approved after 5 days [1].", "sources": [{"doc": "leave-policy", "section": "How to Apply"}]},
+    {"id": "e02", "fault": "extra_sentence", "supported": false, "answer": "Reviews happen in June and December [1]. Ratings decide your annual bonus [1].", "sources": [{"doc": "performance-review-guide", "section": "Cycle"}]},
+    {"id": "e03", "fault": "extra_sentence", "supported": false, "answer": "Employees may work remotely 3 days a week [1]. Fridays are always office days [1].", "sources": [{"doc": "remote-work-policy", "section": "Eligibility"}]},
+
+    {"id": "c01", "fault": "wrong_citation", "supported": false, "answer": "Gifts from vendors must be declined or reported to the Compliance team [1].", "sources": [{"doc": "it-acceptable-use", "section": "Devices"}]},
+    {"id": "c02", "fault": "wrong_citation", "supported": false, "answer": "Full-time employees receive paid annual leave each calendar year [1].", "sources": [{"doc": "onboarding-guide", "section": "Probation"}]},
+    {"id": "c03", "fault": "wrong_citation", "supported": false, "answer": "Suspected personal data breaches must be reported to the Data Protection Officer [1].", "sources": [{"doc": "whistleblower-policy", "section": "Investigation"}]},
+    {"id": "c04", "fault": "wrong_citation", "supported": false, "answer": "Hotel stays are capped per night, with higher caps for New York, London and Tokyo [1].", "sources": [{"doc": "travel-expense-policy", "section": "Meals"}]},
+
+    {"id": "k01", "fault": "contradiction", "supported": false, "answer": "Unused sick leave can be carried forward to the next year [1].", "sources": [{"doc": "leave-policy", "section": "Sick Leave"}]},
+    {"id": "k02", "fault": "contradiction", "supported": false, "answer": "Personal devices may store customer data [1].", "sources": [{"doc": "it-acceptable-use", "section": "Devices"}]},
+    {"id": "k03", "fault": "contradiction", "supported": false, "answer": "Retaliation against people who report in good faith is allowed [1].", "sources": [{"doc": "code-of-conduct", "section": "Reporting Concerns"}]},
+    {"id": "k04", "fault": "contradiction", "supported": false, "answer": "A receipt is not required for any expense [1].", "sources": [{"doc": "travel-expense-policy", "section": "Meals"}]},
+    {"id": "k05", "fault": "contradiction", "supported": false, "answer": "Alcohol is reimbursable [1].", "sources": [{"doc": "travel-expense-policy", "section": "Meals"}]},
+
+    {"id": "o01", "fault": "overgeneralization", "supported": false, "answer": "All unused leave can be carried forward to the next year [1].", "sources": [{"doc": "leave-policy", "section": "Annual Leave"}]},
+    {"id": "o02", "fault": "overgeneralization", "supported": false, "answer": "Employees may always work remotely [1].", "sources": [{"doc": "remote-work-policy", "section": "Eligibility"}]},
+    {"id": "o03", "fault": "overgeneralization", "supported": false, "answer": "Customers can request deletion of their data at any time and it is handled immediately [1].", "sources": [{"doc": "data-privacy-policy", "section": "Individual Rights"}]},
+
+    {"id": "s01", "fault": "no_citation", "supported": false, "answer": "You get 24 days of paid annual leave per calendar year.", "sources": [{"doc": "leave-policy", "section": "Annual Leave"}]},
+    {"id": "s02", "fault": "bad_citation_index", "supported": false, "answer": "You get 24 days of paid annual leave per calendar year [3].", "sources": [{"doc": "leave-policy", "section": "Annual Leave"}]}
+  ]
+}

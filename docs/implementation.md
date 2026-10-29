@@ -65,7 +65,11 @@ ai-application/
 │   │   ├── api/main.py          FastAPI app, routes, startup (sample ingestion)
 │   │   ├── agents/
 │   │   │   ├── graph.py         PolicyAgent: LangGraph workflow
-│   │   │   └── components.py    RegexInputGuard, CitationVerifier
+│   │   │   ├── components.py    RegexInputGuard, CitationVerifier (rule checks)
+│   │   │   ├── claims.py        Splits answers into cited claims
+│   │   │   ├── evidence.py      Numbers, wording coverage, negation, clauses
+│   │   │   ├── checkers.py      Offline and LLM claim checkers, fallback
+│   │   │   └── verifier.py      ClaimVerifier, hints, confidence
 │   │   ├── providers/
 │   │   │   └── generators.py    AnswerGenerator impls, GENERATORS registry, ModelCatalog
 │   │   ├── rag/
@@ -78,7 +82,7 @@ ai-application/
 │   │   │   ├── text.py          Front-matter parsing, text cleaning
 │   │   │   ├── rerank.py        Cross-encoder reranking (RerankingRetriever)
 │   │   │   └── manage.py        reindex and ingest-samples CLI
-│   │   ├── eval/                Golden-set evaluation: cases, metrics, harness, runner, report, CLI
+│   │   ├── eval/                Retrieval golden-set evaluation and the verifier evaluation (verifier_eval.py)
 │   │   ├── auth/                Passwords, JWT, repositories, services, deps, REST router
 │   │   ├── db/                  SQLAlchemy models (schema `auth`), sessions, bootstrap, CLI
 │   ├── alembic/                 Migration 0001 (auth schema)
@@ -215,6 +219,14 @@ Front-matter format (read by `ingest_directory`; stripped from uploaded text in 
 - `GENERATORS` registry: `ollama` (builds `ChatOllama(model, base_url, temperature)`), `extractive`.
 - `ModelCatalog`: maps `ModelSpec.id` to a generator, built **lazily and cached**; exposes `specs()` and `default_id`; `get(None)` returns the default; unknown id raises `KeyError`.
 
+### 4.9a Claim verification (`agents/claims.py`, `evidence.py`, `checkers.py`, `verifier.py`)
+`split_claims` turns an answer into claims (one per sentence, with the sources it cites). A `ClaimChecker` judges each claim against **only the sources it cites**:
+`SupportScoreChecker` (offline: numbers, negation parity per clause, sweeping words, clause-level wording coverage, optional cross-encoder veto) or
+`LLMClaimChecker` (one chat call per answer returning JSON verdicts; provider errors surface as `JudgeError` without their message, and `FallbackChecker` drops back to the offline checker).
+`ClaimVerifier` runs the rule checks first, then the claim checks, and returns a `Verification` with per-claim `ClaimCheck`s (verdict, cited sources, reason, strength), a
+`confidence` (the weakest claim's strength, a heuristic) and a `hint` naming the unsupported claims. `VERIFIER_MODE` selects `rules`, `claims` (default) or `llm`.
+Method, measurements (including why the first numbers were optimistic) and limits: [phase2-verifier-evaluation.md](phase2-verifier-evaluation.md).
+
 ### 4.9 `agents/components.py`
 - `RegexInputGuard`: blocks prompt-injection phrases (e.g. "ignore previous instructions", "reveal your system prompt") and questions over 2000 characters.
 - `CitationVerifier(min_coverage)`: see [section 6](#6-hallucination-prevention).
@@ -291,10 +303,11 @@ Defenses are layered; failing any layer ends in abstention rather than a guess.
    - every `n` is between 1 and the number of sources (no invented sources);
    - citation **coverage**, the share of sentences with a citation, is at least `MIN_CITATION_COVERAGE` (default 0.6);
    - every number in the answer (citation markers excluded) appears verbatim in the concatenated source text, which catches invented figures such as "30 days" when the policy says 24.
-4. **Bounded retry**, then abstain.
-5. **Transparency.** The UI shows citations, the source passage, the similarity score, the verification result and the step trace.
+4. **Claim verifier** (`ClaimVerifier`, default mode `claims`): every sentence is checked against the sources it cites. Catches invented extra claims, sweeping wording, contradictions with negation and wrong citations offline; subtle meaning changes (swapped roles or numbers, flipped conditions, unit changes) need `VERIFIER_MODE=llm`. Measured on 40 held-out answers: rules only 5% of faulty answers caught, offline claims 40% (10% false alarms), LLM judge 100% (0% false alarms, about 17 s per answer).
+5. **Bounded retry with feedback**, then abstain. A failed verification gives the generator a hint naming the unsupported claims; the abstention reason says why.
+6. **Transparency.** The UI shows citations, the source passage, its relevance, the verification result, a confidence band, a per-claim check list and the step trace.
 
-What this does *not* yet do: semantic claim-by-claim entailment checking (a citation may exist but not support the sentence; for example a sabbatical question is still answered from the leave policy), conflict detection between document versions, and a confidence score. These are the remaining Phase 2 items.
+What this does *not* yet do: catch subtle meaning changes without the LLM judge; check that the answer actually addresses the question (a sabbatical question is still answered from the leave policy, with claims that are individually supported); and detect conflicts between document versions. Those are the remaining Phase 2 items.
 
 ## 7. Guardrails and access control
 
@@ -397,7 +410,7 @@ and verifies counts, foreign keys, manager links, idempotency and every sample p
 
 ### 7A.7 Testing against Postgres and SQLite
 The suite runs on a throwaway **SQLite** file by default (the `auth` schema is mapped away), so it works offline. Set
-`TEST_DATABASE_URL=postgresql+psycopg://policy:policy@localhost:5433/policy_test` to run the same 98 tests against
+`TEST_DATABASE_URL=postgresql+psycopg://policy:policy@localhost:5433/policy_test` to run the same 144 tests against
 PostgreSQL. Both have been run: on **PostgreSQL 16.15** the migration builds the schema from scratch (identical to
 `schema.sql`), `JSONB`, identity columns and constraints behave as designed, and every test passes. Running against
 Postgres found nothing that SQLite had hidden, but it did lead to storing absent audit details as SQL `NULL` instead of
@@ -532,6 +545,9 @@ Set as environment variables or in `backend/.env` (see `.env.example`). Names ar
 | `MIN_RERANK_SCORE` | 0.001 | Relevance threshold when a reranker is used (probability). Re-tune with `python -m app.eval` after changing the model |
 | `MIN_CITATION_COVERAGE` | 0.6 | Minimum share of cited sentences |
 | `MAX_GENERATION_ATTEMPTS` | 2 | Generate/verify loop bound |
+| `VERIFIER_MODE` | `claims` | `rules`, `claims` (offline claim-by-claim checks) or `llm` (LLM judge with offline fallback; sends the answer and cited passages to the judge model) |
+| `VERIFIER_MODEL_ID` | `gemini-3.5-flash-lite` | Catalog model used as the judge in `llm` mode |
+| `VERIFIER_MIN_LEXICAL` / `VERIFIER_MIN_CROSS_ENCODER` | 0.5 / 0.01 | Share of a claim's content words that must be in the cited text; minimum cross-encoder probability |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | 900 / 150 | Chunking in characters |
 | `DATABASE_URL` | `postgresql+psycopg://policy:policy@localhost:5432/policy_copilot` | Identity database; a `sqlite:///` URL works for tests and offline development |
 | `AUTO_MIGRATE` | true | Apply Alembic migrations (Postgres) or create tables (SQLite) at startup |
@@ -608,7 +624,7 @@ The token lives in `sessionStorage` (cleared when the tab closes). Chat history 
 ## 14. Testing
 
 ```bash
-cd backend && .venv/Scripts/python -m pytest      # 98 tests (+1 opt-in quality gate: RUN_EVAL=1)
+cd backend && .venv/Scripts/python -m pytest      # 144 tests (+1 opt-in quality gate: RUN_EVAL=1)
 ```
 
 `tests/conftest.py` sets environment variables **before** importing the app: `EMBEDDING_PROVIDER=hash`,
@@ -625,6 +641,8 @@ cd backend && .venv/Scripts/python -m pytest      # 98 tests (+1 opt-in quality 
 | `test_sql_scripts.py` | `/db` scripts match the generator; schema script creates every table and stamps Alembic; drop script touches only `auth`; sample data loads (SQLite), has consistent counts, foreign keys, role levels and manager links, is idempotent, reproducible, and every password verifies |
 | `test_models.py` | Gemini options in the default catalog (cloud-labelled, open-source model stays the default); availability follows the API key (either env name, empty means unset); catalog refuses Gemini without a key and builds it with one (no network); `MODELS_CONFIG` can pin a Gemini id; content-part parsing; `/api/models` fields; 503 with a clear reason without a key; end-to-end chat through a fake Gemini; provider failures never leak error text or key fragments |
 | `test_retrieval.py` | Collection names per layout; threshold follows the scorer; measured defaults; relevance fallback; reranker reorders, truncates, sets relevance and keeps texts; reranked abstention uses the reranker score and reports the threshold in the trace; hybrid store returns cosine relevance plus fused score, finds exact identifiers, still enforces role and status filters, requires sparse vectors on write; dense store has no keyword vectors; the embed stage reports keyword vectors only in hybrid mode |
+| `test_claims.py` | Claim extraction (citations after the full stop, fragments); stemmer, numbers, coverage, clauses, negation and sweeping-word helpers; each fault type flagged and faithful paraphrases supported; two-clause claims with a negation not misread; reasons; cross-encoder veto; thresholds; verifier output (confidence, hint, rule pass-through, abstention); LLM judge (JSON mapping, one call per answer, no call for uncited claims, bad replies, provider errors never leak, fallback counting); the agent retries with the verifier's feedback and then passes, or abstains with the reason; API returns claim checks and confidence; container selects the verifier by mode and falls back offline when the judge model is unavailable |
+| `test_verifier_eval.py` | Both labeled datasets resolve their sources, have unique ids and consistent labels, faithful answers are well formed; the held-out set contains the subtle fault types; metric functions; regression floors (dev 90% caught, held-out 35% caught with at most 15% false alarms); claim checks beat rules-only by more than 25 points on both sets; threshold calibration |
 | `test_eval.py` | Metric functions; golden-set integrity (unique ids, known documents and categories, expected documents active, **every expected fact present in its expected documents**, risk categories covered); an offline end-to-end run where leaks stay at zero and injection cases are always refused; threshold override reaches the agent; opt-in **quality gate with the real models** (`RUN_EVAL=1`) requiring pass rate 90%, refusal rate 85%, answer rate 95%, hit@k 98% and zero leaks |
 
 Not covered by automated tests: the Ollama path (needs a running server), real-embedding relevance, the
@@ -647,7 +665,10 @@ See the [README](../README.md) for setup commands. Operational notes:
 |---|---|
 | Hybrid search is built but unproven: no gain on the 15-document evaluation corpus | Re-evaluate on a larger corpus |
 | The reranker threshold (0.001) was tuned on the same 60 golden cases it is scored on; reranking adds about 280 ms per question on CPU | Grow the golden set (feedback buttons), re-calibrate |
-| Rule-based verifier cannot judge whether a citation truly supports a claim | Phase 2: LLM or NLI groundedness check, conflict detection across versions |
+| The offline claim checks miss subtle meaning changes (10 of 10 on the held-out set); the LLM judge catches them but adds about 17 s and a cloud call per answer | Choose per deployment (`VERIFIER_MODE`); a local judge model would remove the cloud call |
+| The verifier was measured on 40 hand-written held-out answers and not on live LLM output | Run it on real generations once a local or cloud LLM is part of the evaluation |
+| The answer is not checked for relevance to the question (the sabbatical case) | Phase 2, next |
+| No conflict detection between document versions | Phase 2, next |
 | Extractive mode can pick the wrong sentence (3 of 60 golden cases still fail: one reranker miss, one extractive miss, one plausible-but-absent question) | LLM generator plus claim-level verifier (Phase 2, next) |
 | Single-shot Q&A; no conversation memory or query rewriting | Phase 2 |
 | One agent graph; no router, HR-operations or escalation agents | Phase 3 |
@@ -671,8 +692,9 @@ Status of the requirement IDs in [requirements-analysis.md](requirements-analysi
 | FR-RAG-6 | Done | Top-k, fetch-k, thresholds and models configurable |
 | FR-RAG-4 | Not started | Query rewriting and conversation-aware follow-ups |
 | FR-HAL-1, 2, 4, 7 | Done | Closed-book prompt, citations, abstain, number check |
-| FR-HAL-3 | Partial | Rule-based; no semantic entailment |
-| FR-HAL-5, 6, 8 | Partial / not started | Score and version shown; no conflicts or feedback |
+| FR-HAL-3 | Done (limits documented) | Claim-by-claim verifier: offline checks by default, LLM judge optional; subtle meaning changes need the LLM judge |
+| FR-HAL-6 | Done | Confidence band (heuristic), relevance and version shown per source |
+| FR-HAL-5, 8 | Not started | Version conflicts and user feedback |
 | FR-AGT-7, 8 | Done | Explicit graph, bounded attempts |
 | FR-AGT-1 to 6, 9 | Not started | Router, HR-ops, escalation, approvals |
 | FR-GRD-1, 4 | Done / partial | Regex injection check; document RBAC and permission-based endpoint checks |

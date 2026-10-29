@@ -1,0 +1,21 @@
+verifier  split    n  catches faulty  false alarms  precision  accuracy      F1
+-------------------------------------------------------------------------------
+llm       all     40          100.0%          0.0%     100.0%    100.0%  100.0%
+
+recall by fault type (caught/total, all cases):
+  fault                          llm
+  contradiction               2/2   
+  entity_swap                 2/2   
+  extra_clause                3/3   
+  fabricated_claim            2/2   
+  flipped_condition           3/3   
+  number_swap                 1/1   
+  overgeneralization          1/1   
+  role_swap                   1/1   
+  unit_change                 3/3   
+  wrong_citation              1/1   
+  wrong_number                1/1   
+
+llm: 0 wrong verdict(s)
+
+LLM judge fallbacks to the offline checker: 0 of 40 answers

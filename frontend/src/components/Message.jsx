@@ -22,6 +22,14 @@ function Cited({ text, sources, onPick }) {
   });
 }
 
+// Evidence strength of the weakest claim, shown as a band. Heuristic: it is not a calibrated probability.
+function confidenceBand(value) {
+  if (value == null) return null;
+  if (value >= 0.7) return { label: "High", style: "bg-success-soft text-success" };
+  if (value >= 0.5) return { label: "Medium", style: "bg-warn-soft text-warn" };
+  return { label: "Low", style: "bg-danger-soft text-danger" };
+}
+
 function ScoreBar({ score }) {
   // `score` is the calibrated relevance (0..1). Cross-encoder probabilities can be tiny, so show "<1%" instead of 0%.
   const pct = Math.round(Math.max(0, Math.min(1, score)) * 100);
@@ -39,6 +47,7 @@ function ScoreBar({ score }) {
 export default function Message({ m }) {
   const [active, setActive] = useState(null);
   const [showTrace, setShowTrace] = useState(false);
+  const [showClaims, setShowClaims] = useState(false);
 
   if (m.role === "user") {
     return (
@@ -61,6 +70,8 @@ export default function Message({ m }) {
 
   const sources = m.sources || [];
   const v = m.verification;
+  const claims = v?.claims || [];
+  const confidence = confidenceBand(v?.confidence);
   return (
     <div className="flex items-start gap-3">
       <Logo className="size-8" />
@@ -128,6 +139,22 @@ export default function Message({ m }) {
               {v.passed ? "Verified" : "Not verified"} · {v.reason}
             </span>
           )}
+          {v?.passed && confidence && (
+            <span className={`badge ${confidence.style}`} title="Evidence strength of the weakest claim. A heuristic, not a probability.">
+              {confidence.label} confidence
+            </span>
+          )}
+          {claims.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowClaims(!showClaims)}
+              aria-expanded={showClaims}
+              className="inline-flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-muted transition-colors hover:text-fg"
+            >
+              Claim checks ({claims.length})
+              <ChevronDown className={`size-3.5 transition-transform ${showClaims ? "rotate-180" : ""}`} />
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setShowTrace(!showTrace)}
@@ -138,6 +165,31 @@ export default function Message({ m }) {
             <ChevronDown className={`size-3.5 transition-transform ${showTrace ? "rotate-180" : ""}`} />
           </button>
         </div>
+
+        {showClaims && (
+          <ul className="space-y-2 text-xs">
+            {claims.map((c, i) => (
+              <li key={i} className="flex items-start gap-2 rounded-xl border border-border bg-surface-2/50 px-3 py-2">
+                <span className={`mt-0.5 grid size-4 shrink-0 place-items-center rounded-full ${c.verdict === "supported" ? "bg-success-soft text-success" : "bg-danger-soft text-danger"}`}>
+                  {c.verdict === "supported" ? <Check className="size-3" /> : <X className="size-3" />}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block leading-relaxed">
+                    {c.claim}
+                    {c.cited.map((n) => (
+                      <span key={n} className="ml-1 inline-flex size-4 items-center justify-center rounded bg-accent-soft text-[10px] font-semibold text-accent-text">{n}</span>
+                    ))}
+                  </span>
+                  <span className="text-muted">
+                    {c.verdict}
+                    {c.reason ? `: ${c.reason}` : ""}
+                    {c.strength != null ? ` · evidence ${Math.round(c.strength * 100)}%` : ""}
+                  </span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
 
         {showTrace && (
           <ol className="space-y-1.5 border-l border-border pl-4 text-xs text-muted">
