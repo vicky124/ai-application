@@ -21,7 +21,7 @@ from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 
 from app.domain import DocumentMeta, ParsedPage
-from app.interfaces import VectorIndex
+from app.interfaces import SparseEmbedder, VectorIndex
 from app.rag.chunking import chunk_text
 from app.rag.parsers import ParserRegistry
 from app.rag.text import clean_text, parse_frontmatter
@@ -55,6 +55,8 @@ class IngestionPipeline:
         collection: str,
         chunk_size: int,
         chunk_overlap: int,
+        sparse: SparseEmbedder | None = None,
+        sparse_label: str | None = None,
     ):
         self._index = index
         self._parsers = parsers
@@ -63,6 +65,8 @@ class IngestionPipeline:
         self._collection = collection
         self._size = chunk_size
         self._overlap = chunk_overlap
+        self._sparse = sparse
+        self._sparse_label = sparse_label
         self._stages: dict[str, Callable[[dict], dict]] = {
             "receive": self._receive,
             "parse": self._parse,
@@ -168,20 +172,30 @@ class IngestionPipeline:
         vectors = self._embeddings.embed_documents([d.page_content for d in docs])
         ctx["vectors"] = vectors
         first = vectors[0]
-        return {
+        details = {
             "model": self._embedding_label,
             "vectors": len(vectors),
             "dimensions": len(first),
             "first_vector_preview": [round(float(x), 4) for x in first[:VECTOR_PREVIEW_DIMS]],
             "first_vector_l2_norm": round(math.sqrt(sum(x * x for x in first)), 4),
         }
+        if self._sparse is not None:
+            sparse = self._sparse.embed_documents([d.page_content for d in docs])
+            ctx["sparse_vectors"] = sparse
+            terms = [len(indices) for indices, _ in sparse]
+            details |= {
+                "keyword_model": self._sparse_label,
+                "keyword_vectors": len(sparse),
+                "keyword_terms_per_chunk": f"min {min(terms)}, avg {round(sum(terms) / len(terms))}, max {max(terms)}",
+            }
+        return details
 
     def _store(self, ctx: dict) -> dict:
         meta: DocumentMeta = ctx["meta"]
         docs, vectors = ctx["docs"], ctx["vectors"]
         previous = self._index.count_chunks(meta.doc_id)
         self._index.delete(meta.doc_id)
-        ids = self._index.add_vectors(docs, vectors)
+        ids = self._index.add_vectors(docs, vectors, ctx.get("sparse_vectors"))
         return {
             "collection": self._collection,
             "previous_chunks_removed": previous,

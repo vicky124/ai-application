@@ -6,25 +6,46 @@ from langchain_core.documents import Document
 
 from app.domain import GuardResult, ParsedPage, Source, Verification
 
+# A sparse vector as (indices, values), for keyword-style (BM25 / SPLADE) retrieval.
+SparseVec = tuple[list[int], list[float]]
+
 
 class DocumentParser(Protocol):
     def parse(self, data: bytes) -> list[ParsedPage]: ...
 
 
-class VectorStore(Protocol):
-    def add(self, docs: list[Document]) -> None: ...
+class Retriever(Protocol):
+    """What the agent needs: the best passages for a question that this role may read."""
+
     def search(self, query: str, role: str, k: int) -> list[Source]: ...
+
+
+class VectorStore(Retriever, Protocol):
+    """Read and manage side of the index (a Retriever plus document management)."""
+
     def delete(self, doc_id: str) -> None: ...
     def list_documents(self) -> list[dict]: ...
 
 
-class VectorIndex(Protocol):
+class VectorIndex(Retriever, Protocol):
     """Write side used by the ingestion pipeline (separate from the read-side VectorStore: ISP)."""
 
-    def add_vectors(self, docs: list[Document], vectors: list[list[float]]) -> list[str]: ...
+    def add_vectors(
+        self, docs: list[Document], vectors: list[list[float]], sparse_vectors: list[SparseVec] | None = None
+    ) -> list[str]: ...
     def delete(self, doc_id: str) -> None: ...
     def count_chunks(self, doc_id: str) -> int: ...
-    def search(self, query: str, role: str, k: int) -> list[Source]: ...
+
+
+class SparseEmbedder(Protocol):
+    def embed_documents(self, texts: list[str]) -> list[SparseVec]: ...
+    def embed_query(self, text: str) -> SparseVec: ...
+
+
+class Reranker(Protocol):
+    """Scores passages against a query with a cross-encoder. Returns probabilities in 0..1, higher is more relevant."""
+
+    def score(self, query: str, passages: list[str]) -> list[float]: ...
 
 
 class AnswerGenerator(Protocol):

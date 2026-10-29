@@ -50,8 +50,21 @@ class Settings(BaseSettings):
     embedding_provider: str = "fastembed"  # "fastembed" | "hash"
     embedding_model: str = "BAAI/bge-small-en-v1.5"
 
+    # Retrieval: "dense" (embeddings only) or "hybrid" (dense + BM25 keywords fused with RRF). Hybrid showed no gain on the
+    # 13-document evaluation corpus (see eval/reports), so it is opt-in; it may matter on larger corpora.
+    retrieval_mode: str = "dense"
+    sparse_provider: str = "fastembed"  # fastembed | hash
+    sparse_model: str = "Qdrant/bm25"
+    # Reranking: "none", "fastembed" (cross-encoder) or "overlap" (offline test double).
+    reranker_provider: str = "fastembed"  # measured: +13 points overall pass rate and 50% -> 93% correct refusals
+    reranker_model: str = "Xenova/ms-marco-MiniLM-L-6-v2"
+    rerank_fetch_k: int = 10  # candidates fetched before hybrid fusion / reranking (10 vs 20: same accuracy, half the latency)
+
     top_k: int = 5
+    # The agent abstains when the best passage's relevance is below this. Scores from different scorers are on
+    # different scales, so each has its own threshold: cosine similarity without a reranker, probability with one.
     min_retrieval_score: float = 0.45
+    min_rerank_score: float = 0.001
     min_citation_coverage: float = 0.6
     max_generation_attempts: int = 2
     chunk_size: int = 900
@@ -86,9 +99,14 @@ class Settings(BaseSettings):
         return DEFAULT_MODELS
 
     @property
+    def relevance_threshold(self) -> float:
+        return self.min_rerank_score if self.reranker_provider != "none" else self.min_retrieval_score
+
+    @property
     def collection_name(self) -> str:
+        """One collection per embedding model and retrieval layout (vector sizes and sparse vectors differ)."""
         slug = re.sub(r"[^a-z0-9]+", "_", self.embedding_model.lower()).strip("_")
-        return f"{self.qdrant_collection_prefix}__{self.embedding_provider}_{slug}"
+        return f"{self.qdrant_collection_prefix}__{self.embedding_provider}_{slug}__v2_{self.retrieval_mode}"
 
 
 settings = Settings()

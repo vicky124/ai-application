@@ -75,7 +75,10 @@ ai-application/
 │   │   │   ├── store.py         QdrantPolicyStore (VectorStore + VectorIndex impl)
 │   │   │   ├── pipeline.py      IngestionPipeline: 7 observable stages emitting events
 │   │   │   ├── ingest.py        IngestionService (blocking use, directory loading)
-│   │   │   └── text.py          Front-matter parsing, text cleaning
+│   │   │   ├── text.py          Front-matter parsing, text cleaning
+│   │   │   ├── rerank.py        Cross-encoder reranking (RerankingRetriever)
+│   │   │   └── manage.py        reindex and ingest-samples CLI
+│   │   ├── eval/                Golden-set evaluation: cases, metrics, harness, runner, report, CLI
 │   │   ├── auth/                Passwords, JWT, repositories, services, deps, REST router
 │   │   ├── db/                  SQLAlchemy models (schema `auth`), sessions, bootstrap, CLI
 │   ├── alembic/                 Migration 0001 (auth schema)
@@ -141,10 +144,25 @@ LangChain `Embeddings` implementations registered under `EMBEDDINGS`:
 Scanned PDFs (no text layer) yield empty pages; OCR is out of scope.
 
 ### 4.6 `rag/store.py`: `QdrantPolicyStore`
-Implements `VectorStore` using `langchain_qdrant.QdrantVectorStore`.
-- Creates the collection on first use (cosine distance, size from the embedder) and best-effort payload indexes on `metadata.doc_id|status|allowed_roles` (ignored by embedded mode).
-- `search` applies a **mandatory server-side filter**: `status == "active"` AND `allowed_roles` contains the caller's role or `"all"`. Filtering happens inside Qdrant, so restricted chunks are never returned to the application.
-- `delete(doc_id)` removes all chunks of a document by filter; `list_documents()` scrolls the collection and aggregates chunk counts per document.
+Implements the read side (`Retriever`, `VectorStore`) and the write side (`VectorIndex`) directly on `qdrant_client`.
+- **Named vectors.** Each chunk has a `dense` vector (cosine, size from the embedder) and, in hybrid mode, a `sparse` BM25 vector (Qdrant applies IDF at query time). The collection name encodes the embedding model and layout, for example `policy_chunks__fastembed_baai_bge_small_en_v1_5__v2_dense`, so changing either creates a new collection; migrate with `python -m app.rag.manage reindex`.
+- `search` applies a **mandatory server-side filter**: `status == "active"` AND `allowed_roles` contains the caller's role or `"all"`. In hybrid mode the filter is applied inside both rankings, which are fused with Reciprocal Rank Fusion. Filtering happens inside Qdrant, so restricted chunks are never returned to the application.
+- Every result carries `score` (what ranked it) and `relevance` (0..1, comparable across questions: the dense cosine similarity, or the reranker probability when reranking is on). The agent's answer/abstain decision uses `relevance`, because fused rank scores are not comparable across questions.
+- `add_vectors(docs, vectors, sparse_vectors)`, `count_chunks`, `delete(doc_id)` and `list_documents()` as before; the payload layout (`page_content`, `metadata`) is unchanged.
+
+### 4.6a Reranking (`rag/rerank.py`) and retrieval configuration
+`RerankingRetriever` decorates any `Retriever`: it fetches `RERANK_FETCH_K` candidates (default 10), scores each with a cross-encoder
+(`Xenova/ms-marco-MiniLM-L-6-v2`, local ONNX via FastEmbed, registered as `fastembed`; `overlap` is an offline test double), keeps the best `TOP_K`,
+and sets both `score` and `relevance` to the reranker probability. Because that probability has its own scale, the agent threshold is
+`MIN_RERANK_SCORE` (default 0.001) when a reranker is active and `MIN_RETRIEVAL_SCORE` (0.45, cosine) otherwise. The decision to make reranking the
+default, keep hybrid opt-in, and the numbers behind it are in [phase2-retrieval-evaluation.md](phase2-retrieval-evaluation.md).
+
+### 4.6b Evaluation suite (`app/eval/`, `backend/eval/`)
+`python -m app.eval` runs the 60-case golden set (`eval/golden_set.json`, corpus in `eval/corpus` and `data/sample_docs`) through the **real**
+`Container` on a throwaway Qdrant folder, one retrieval configuration at a time, and reports retrieval metrics (hit@k, MRR, recall), answer metrics
+(answered, facts, citation precision), safety (refusals, leaks), threshold calibration and latency. `--configs dense:none,hybrid:none,dense:fastembed,hybrid:fastembed`
+compares configurations; `--json` writes a report; `--min-pass-rate` makes it a CI gate. Modules: `cases.py` (golden-set loading), `metrics.py` (pure
+functions), `harness.py` (stack builder), `runner.py`, `report.py`, `__main__.py`.
 
 ### 4.7 Ingestion pipeline (`rag/pipeline.py`, `rag/ingest.py`, `rag/text.py`)
 
@@ -252,7 +270,7 @@ abstain_reason, trace`.
 | Node | Behavior |
 |---|---|
 | `guard` | Runs `InputGuard.check`. On block sets `abstained` and the reason. |
-| `retrieve` | `store.search(question, role, TOP_K)`; keeps only chunks with `score >= MIN_RETRIEVAL_SCORE`. Zero kept means abstain with "no relevant sources". |
+| `retrieve` | `retriever.search(question, role, TOP_K)`; keeps only chunks whose `relevance` is at least the active threshold (`MIN_RERANK_SCORE` with a reranker, otherwise `MIN_RETRIEVAL_SCORE`). Zero kept means abstain with "no relevant sources". The trace shows the threshold and the best relevance. |
 | `generate` | Resolves the generator for `model_id` (default if none), generates an answer, increments `attempts`. |
 | `verify` | Runs `Verifier.verify`. |
 | `abstain` | Replaces the answer with a fixed message directing the user to HR; keeps the reason. |
@@ -267,7 +285,7 @@ Each node appends a human-readable line to `trace` (for example `retrieve: 5 fou
 Defenses are layered; failing any layer ends in abstention rather than a guess.
 
 1. **Closed-book prompt.** The model sees only the retrieved sources and is told to answer from them or emit `INSUFFICIENT_CONTEXT`.
-2. **Retrieval threshold.** Chunks below `MIN_RETRIEVAL_SCORE` (cosine similarity, default 0.45) are dropped. An off-topic question ("how do I bake bread?") retrieves nothing relevant and abstains before any model is called.
+2. **Relevance threshold.** Chunks whose cross-encoder relevance is below `MIN_RERANK_SCORE` (default 0.001) are dropped, so off-topic and plausible-but-absent questions ("how do I bake bread?", "pet insurance") abstain before any model is called. On the golden set this raised correct refusals from 50% (cosine similarity alone cannot separate the cases) to 93%.
 3. **Citation verifier** (`CitationVerifier`), applied to every non-abstaining answer:
    - at least one `[n]` citation exists;
    - every `n` is between 1 and the number of sources (no invented sources);
@@ -276,7 +294,7 @@ Defenses are layered; failing any layer ends in abstention rather than a guess.
 4. **Bounded retry**, then abstain.
 5. **Transparency.** The UI shows citations, the source passage, the similarity score, the verification result and the step trace.
 
-What this does *not* yet do: semantic claim-by-claim entailment checking (a citation may exist but not support the sentence), conflict detection between document versions, and a confidence score. These are Phase 2 items.
+What this does *not* yet do: semantic claim-by-claim entailment checking (a citation may exist but not support the sentence; for example a sabbatical question is still answered from the leave policy), conflict detection between document versions, and a confidence score. These are the remaining Phase 2 items.
 
 ## 7. Guardrails and access control
 
@@ -379,7 +397,7 @@ and verifies counts, foreign keys, manager links, idempotency and every sample p
 
 ### 7A.7 Testing against Postgres and SQLite
 The suite runs on a throwaway **SQLite** file by default (the `auth` schema is mapped away), so it works offline. Set
-`TEST_DATABASE_URL=postgresql+psycopg://policy:policy@localhost:5433/policy_test` to run the same 71 tests against
+`TEST_DATABASE_URL=postgresql+psycopg://policy:policy@localhost:5433/policy_test` to run the same 98 tests against
 PostgreSQL. Both have been run: on **PostgreSQL 16.15** the migration builds the schema from scratch (identical to
 `schema.sql`), `JSONB`, identity columns and constraints behave as designed, and every test passes. Running against
 Postgres found nothing that SQLite had hidden, but it did lead to storing absent audit details as SQL `NULL` instead of
@@ -504,8 +522,14 @@ Set as environment variables or in `backend/.env` (see `.env.example`). Names ar
 | `QDRANT_COLLECTION_PREFIX` | `policy_chunks` | Prefix of the collection name |
 | `EMBEDDING_PROVIDER` | `fastembed` | `fastembed` or `hash` |
 | `EMBEDDING_MODEL` | `BAAI/bge-small-en-v1.5` | Model for the embedding provider |
-| `TOP_K` | 5 | Chunks retrieved per question |
-| `MIN_RETRIEVAL_SCORE` | 0.45 | Minimum similarity to keep a chunk |
+| `RETRIEVAL_MODE` | `dense` | `dense`, or `hybrid` (dense + BM25 keywords fused with RRF; opt-in, no gain measured on the evaluation corpus) |
+| `SPARSE_PROVIDER` / `SPARSE_MODEL` | `fastembed` / `Qdrant/bm25` | Keyword vectors for hybrid mode (`hash` is an offline fallback) |
+| `RERANKER_PROVIDER` | `fastembed` | `fastembed` (cross-encoder), `overlap` (offline test double) or `none` |
+| `RERANKER_MODEL` | `Xenova/ms-marco-MiniLM-L-6-v2` | Cross-encoder (80 MB). Larger options include `BAAI/bge-reranker-base` |
+| `RERANK_FETCH_K` | 10 | Candidates handed to the reranker (10 vs 20: same accuracy, about 60% of the latency) |
+| `TOP_K` | 5 | Chunks kept per question |
+| `MIN_RETRIEVAL_SCORE` | 0.45 | Relevance threshold when **no** reranker is used (cosine similarity) |
+| `MIN_RERANK_SCORE` | 0.001 | Relevance threshold when a reranker is used (probability). Re-tune with `python -m app.eval` after changing the model |
 | `MIN_CITATION_COVERAGE` | 0.6 | Minimum share of cited sentences |
 | `MAX_GENERATION_ATTEMPTS` | 2 | Generate/verify loop bound |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | 900 / 150 | Chunking in characters |
@@ -584,11 +608,11 @@ The token lives in `sessionStorage` (cleared when the tab closes). Chat history 
 ## 14. Testing
 
 ```bash
-cd backend && .venv/Scripts/python -m pytest      # 71 tests
+cd backend && .venv/Scripts/python -m pytest      # 98 tests (+1 opt-in quality gate: RUN_EVAL=1)
 ```
 
 `tests/conftest.py` sets environment variables **before** importing the app: `EMBEDDING_PROVIDER=hash`,
-`QDRANT_PATH` to a temp directory, and `MIN_RETRIEVAL_SCORE=0.15`. Tests therefore run offline in about a second, using the
+`QDRANT_PATH` to a temp directory, `MIN_RETRIEVAL_SCORE=0.15`, and `RERANKER_PROVIDER=none` (reranking and hybrid retrieval are tested separately with offline doubles). Tests therefore run offline in about a second, using the
 `extractive` model.
 
 | File | Covers |
@@ -600,6 +624,8 @@ cd backend && .venv/Scripts/python -m pytest      # 71 tests
 | `test_schema.py` | Alembic migration and SQLAlchemy models define the same tables, constraints and indexes (offline SQL generation); everything is in the `auth` schema |
 | `test_sql_scripts.py` | `/db` scripts match the generator; schema script creates every table and stamps Alembic; drop script touches only `auth`; sample data loads (SQLite), has consistent counts, foreign keys, role levels and manager links, is idempotent, reproducible, and every password verifies |
 | `test_models.py` | Gemini options in the default catalog (cloud-labelled, open-source model stays the default); availability follows the API key (either env name, empty means unset); catalog refuses Gemini without a key and builds it with one (no network); `MODELS_CONFIG` can pin a Gemini id; content-part parsing; `/api/models` fields; 503 with a clear reason without a key; end-to-end chat through a fake Gemini; provider failures never leak error text or key fragments |
+| `test_retrieval.py` | Collection names per layout; threshold follows the scorer; measured defaults; relevance fallback; reranker reorders, truncates, sets relevance and keeps texts; reranked abstention uses the reranker score and reports the threshold in the trace; hybrid store returns cosine relevance plus fused score, finds exact identifiers, still enforces role and status filters, requires sparse vectors on write; dense store has no keyword vectors; the embed stage reports keyword vectors only in hybrid mode |
+| `test_eval.py` | Metric functions; golden-set integrity (unique ids, known documents and categories, expected documents active, **every expected fact present in its expected documents**, risk categories covered); an offline end-to-end run where leaks stay at zero and injection cases are always refused; threshold override reaches the agent; opt-in **quality gate with the real models** (`RUN_EVAL=1`) requiring pass rate 90%, refusal rate 85%, answer rate 95%, hit@k 98% and zero leaks |
 
 Not covered by automated tests: the Ollama path (needs a running server), real-embedding relevance, the
 frontend, PDF parsing, and Postgres in CI (the suite uses SQLite unless `TEST_DATABASE_URL` is set; it has been run on
@@ -619,15 +645,16 @@ See the [README](../README.md) for setup commands. Operational notes:
 
 | Limitation | Planned phase |
 |---|---|
-| Dense-only retrieval, no reranker | Phase 2: hybrid (dense + sparse) search and reranking |
+| Hybrid search is built but unproven: no gain on the 15-document evaluation corpus | Re-evaluate on a larger corpus |
+| The reranker threshold (0.001) was tuned on the same 60 golden cases it is scored on; reranking adds about 280 ms per question on CPU | Grow the golden set (feedback buttons), re-calibrate |
 | Rule-based verifier cannot judge whether a citation truly supports a claim | Phase 2: LLM or NLI groundedness check, conflict detection across versions |
-| Extractive mode can return loosely related sentences | Mitigated by an LLM plus verifier; measured by a golden-set evaluation (Phase 2) |
+| Extractive mode can pick the wrong sentence (3 of 60 golden cases still fail: one reranker miss, one extractive miss, one plausible-but-absent question) | LLM generator plus claim-level verifier (Phase 2, next) |
 | Single-shot Q&A; no conversation memory or query rewriting | Phase 2 |
 | One agent graph; no router, HR-operations or escalation agents | Phase 3 |
 | Regex-only guardrails; no PII redaction, no document-side injection scanning | Phase 4 |
 | Observability is the per-request trace only; no persistence, cost or quality metrics | Phase 5 (Langfuse or Phoenix, audit log, dashboard) |
 | In-memory chat history; no admin UI for users (the REST API exists); no per-IP rate limiting, MFA or OIDC | Phase 3 to 6 |
-| No evaluation suite in CI | Phase 2 |
+| The real-model quality gate is opt-in (`RUN_EVAL=1`), not yet run in CI; no model-based groundedness judge | Phase 2, next |
 
 ## 17. Requirements traceability
 
@@ -638,9 +665,11 @@ Status of the requirement IDs in [requirements-analysis.md](requirements-analysi
 | FR-ING-1, 2, 3, 4, 5, 6 | Done (partial for 5) | md/txt/pdf; versions stored and `status` filtered, no automatic supersede workflow |
 | FR-ING-8 | Done | Step-by-step pipeline view in the Ingestion tab |
 | FR-ING-7 | Not started | Document-side injection scan |
-| FR-RAG-1 | Partial | Dense only |
+| FR-RAG-1 | Done (opt-in) | Hybrid dense + BM25 with RRF behind `RETRIEVAL_MODE=hybrid`; dense is the measured default |
 | FR-RAG-2, 5 | Done | Role/status filters; section/page/title returned |
-| FR-RAG-3, 4, 6 | Not started / partial | Thresholds configurable; no rerank or query rewriting |
+| FR-RAG-3 | Done | Cross-encoder reranking, default on |
+| FR-RAG-6 | Done | Top-k, fetch-k, thresholds and models configurable |
+| FR-RAG-4 | Not started | Query rewriting and conversation-aware follow-ups |
 | FR-HAL-1, 2, 4, 7 | Done | Closed-book prompt, citations, abstain, number check |
 | FR-HAL-3 | Partial | Rule-based; no semantic entailment |
 | FR-HAL-5, 6, 8 | Partial / not started | Score and version shown; no conflicts or feedback |
@@ -649,7 +678,8 @@ Status of the requirement IDs in [requirements-analysis.md](requirements-analysi
 | FR-GRD-1, 4 | Done / partial | Regex injection check; document RBAC and permission-based endpoint checks |
 | FR-GRD-2, 3, 5 to 8 | Not started | |
 | FR-OBS-1 | Partial | Step trace per request |
-| FR-OBS-2 to 8 | Not started | |
+| FR-OBS-6 | Partial | Golden-set evaluation with CLI, JSON reports and an opt-in quality gate; not yet in CI |
+| FR-OBS-2 to 5, 7, 8 | Not started | |
 | FR-UI-1 (streaming) | Partial | Chat without streaming |
 | FR-UI-2, 3, 7 | Partial | Citations and source view, step trace; no feedback button |
 | FR-UI-5 | Partial | Document upload, list and delete with live ingestion steps; no version history or guardrail settings |

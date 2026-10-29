@@ -8,6 +8,8 @@ from pathlib import Path
 os.environ["EMBEDDING_PROVIDER"] = "hash"
 os.environ["QDRANT_PATH"] = tempfile.mkdtemp(prefix="qdrant_test_")
 os.environ["MIN_RETRIEVAL_SCORE"] = "0.15"
+os.environ["RERANKER_PROVIDER"] = "none"  # keep the API tests offline and fast; reranking is tested separately
+os.environ["RETRIEVAL_MODE"] = "dense"
 os.environ["DATABASE_URL"] = os.environ.get("TEST_DATABASE_URL") or f"sqlite:///{Path(tempfile.mkdtemp(prefix='auth_test_')) / 'auth.db'}"
 os.environ["JWT_SECRET"] = "test-secret-test-secret-test-secret-123"
 os.environ["SEED_DEMO_USERS"] = "true"

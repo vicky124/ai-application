@@ -23,13 +23,15 @@ function Cited({ text, sources, onPick }) {
 }
 
 function ScoreBar({ score }) {
+  // `score` is the calibrated relevance (0..1). Cross-encoder probabilities can be tiny, so show "<1%" instead of 0%.
   const pct = Math.round(Math.max(0, Math.min(1, score)) * 100);
+  const label = pct === 0 && score > 0 ? "<1%" : `${pct}%`;
   return (
-    <span className="flex items-center gap-2" title={`Similarity ${pct}%`}>
+    <span className="flex items-center gap-2" title={`Relevance ${(score * 100).toFixed(2)}%`}>
       <span className="h-1.5 w-14 overflow-hidden rounded-full bg-surface-2">
-        <span className="block h-full rounded-full bg-accent" style={{ width: `${pct}%` }} />
+        <span className="block h-full rounded-full bg-accent" style={{ width: `${Math.max(pct, score > 0 ? 3 : 0)}%` }} />
       </span>
-      <span className="w-8 text-right text-xs tabular-nums text-muted">{pct}%</span>
+      <span className="w-8 text-right text-xs tabular-nums text-muted">{label}</span>
     </span>
   );
 }
@@ -101,7 +103,7 @@ export default function Message({ m }) {
                       v{s.version}
                       {s.page ? ` · p.${s.page}` : ""}
                     </span>
-                    <ScoreBar score={s.score} />
+                    <ScoreBar score={s.relevance ?? s.score} />
                     <ChevronDown className={`size-4 shrink-0 text-muted transition-transform ${active === i ? "rotate-180" : ""}`} />
                   </button>
                   {active === i && (

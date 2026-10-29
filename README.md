@@ -6,7 +6,7 @@ Built on open-source models: local embeddings via FastEmbed and LLMs served by O
 
 | Concern | Implementation |
 |---|---|
-| RAG | LangChain + Qdrant, heading-aware chunking, status and role filters at query time |
+| RAG | Qdrant with named dense (and optional BM25) vectors, local cross-encoder reranking, heading-aware chunking, status and role filters at query time |
 | Hallucination prevention | Mandatory citations, rule-based verifier (citation validity, coverage, numbers present in sources), bounded retry, abstain |
 | Multi-agent orchestration | LangGraph state graph (guard, retrieve, generate, verify, abstain); more agents planned |
 | Guardrails | Prompt-injection check, RBAC on retrieval, permission-checked endpoints |
@@ -15,11 +15,18 @@ Built on open-source models: local embeddings via FastEmbed and LLMs served by O
 
 ## Documentation
 - [Implementation guide](docs/implementation.md): architecture, modules, agent flow, API and config reference, extension guides, testing, limitations
-- [Requirements analysis](docs/requirements-analysis.md): scope, requirements, phases
+- [Requirements analysis](docs/requirements-analysis.md)
+- [Phase 2 retrieval evaluation](docs/phase2-retrieval-evaluation.md): golden set, ablation results, decisions, limits: scope, requirements, phases
 
 ## Status
 **Phase 1 (foundation) done:** ingestion, RAG with citations, abstention, RBAC, model selection, React chat UI.
 See [docs/requirements-analysis.md](docs/requirements-analysis.md) for the full roadmap.
+
+## Retrieval quality and evaluation
+A 60-case golden set measures retrieval and the answer-or-refuse decision (`python -m app.eval`). Adding a local cross-encoder reranker raised the
+overall pass rate from 81.7% to 95.0% and correct refusals from 50% to 93%; hybrid (BM25) search showed no gain on this small corpus, so it is
+opt-in. Method, results and limits: [docs/phase2-retrieval-evaluation.md](docs/phase2-retrieval-evaluation.md).
+Existing Phase 1 data can be migrated with `python -m app.rag.manage reindex`.
 
 ## Authentication and authorization
 Users, roles and sessions are stored in PostgreSQL (schema `auth`). Roles carry an access **level** and a set of
@@ -95,7 +102,7 @@ Optional services (Qdrant server, Ollama): `docker compose up -d`, then set `QDR
 ## Tests
 ```bash
 cd backend
-.venv/Scripts/python -m pytest        # 71 tests; uses SQLite unless TEST_DATABASE_URL points to Postgres
+.venv/Scripts/python -m pytest        # 98 tests; uses SQLite unless TEST_DATABASE_URL points to Postgres
 ```
 
 ## Layout

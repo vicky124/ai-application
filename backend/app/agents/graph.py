@@ -7,7 +7,7 @@ from typing import Callable, TypedDict
 from langgraph.graph import END, StateGraph
 
 from app.domain import Source, Verification
-from app.interfaces import AnswerGenerator, InputGuard, VectorStore, Verifier
+from app.interfaces import AnswerGenerator, InputGuard, Retriever, Verifier
 from app.providers.generators import INSUFFICIENT
 
 ABSTAIN_TEXT = (
@@ -33,14 +33,14 @@ class PolicyAgent:
     def __init__(
         self,
         guard: InputGuard,
-        store: VectorStore,
+        retriever: Retriever,
         resolve_generator: Callable[[str | None], AnswerGenerator],
         verifier: Verifier,
         top_k: int,
         min_score: float,
         max_attempts: int,
     ):
-        self._guard, self._store, self._resolve, self._verifier = guard, store, resolve_generator, verifier
+        self._guard, self._retriever, self._resolve, self._verifier = guard, retriever, resolve_generator, verifier
         self._top_k, self._min_score, self._max_attempts = top_k, min_score, max_attempts
         self.graph = self._build()
 
@@ -52,9 +52,10 @@ class PolicyAgent:
         return {"abstained": True, "abstain_reason": r.reason, "trace": s["trace"] + [f"guard: blocked ({r.reason})"]}
 
     def _retrieve_node(self, s: AgentState) -> AgentState:
-        found = self._store.search(s["question"], s["role"], self._top_k)
-        kept = [x for x in found if x.score >= self._min_score]
-        note = f"retrieve: {len(found)} found, {len(kept)} above threshold"
+        found = self._retriever.search(s["question"], s["role"], self._top_k)
+        kept = [x for x in found if x.relevance_or_score >= self._min_score]
+        best = max((x.relevance_or_score for x in found), default=0.0)
+        note = f"retrieve: {len(found)} found, {len(kept)} above threshold {self._min_score:g} (best relevance {best:.3g})"
         if not kept:
             return {"sources": [], "abstained": True, "abstain_reason": "no relevant sources", "trace": s["trace"] + [note]}
         return {"sources": kept, "trace": s["trace"] + [note]}

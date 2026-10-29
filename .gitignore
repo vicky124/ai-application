@@ -10,3 +10,6 @@ dist/
 backend/data/qdrant/
 qdrant_storage/
 *.db
+
+# Timestamped evaluation reports are local; the committed phase2-ablation.json is the reference result
+backend/eval/reports/2*.json
