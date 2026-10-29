@@ -88,7 +88,7 @@ class User(Base):
     failed_login_attempts: Mapped[int] = mapped_column(sa.Integer, default=0, server_default="0")
     locked_until: Mapped[datetime | None] = mapped_column(UTCDateTime)
     last_login_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
-    password_changed_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    password_changed_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, server_default=sa.func.now())
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, server_default=sa.func.now())
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, onupdate=utcnow, server_default=sa.func.now())
 

@@ -59,6 +59,7 @@ CREATE ROLE policy LOGIN PASSWORD 'policy';
 CREATE DATABASE policy_copilot OWNER policy;
 ```
 Use a different URL via `DATABASE_URL` (see `backend/.env.example`). The schema and tables are created by migration at startup.
+Prefer plain SQL? The [db/](db/README.md) folder has `schema.sql`, `sample_data.sql` and `drop_schema.sql` for the same schema.
 
 
 **2. Backend and frontend**
@@ -86,7 +87,7 @@ Optional services (Qdrant server, Ollama): `docker compose up -d`, then set `QDR
 ## Tests
 ```bash
 cd backend
-.venv/Scripts/python -m pytest        # 51 tests; uses SQLite unless TEST_DATABASE_URL points to Postgres
+.venv/Scripts/python -m pytest        # 59 tests; uses SQLite unless TEST_DATABASE_URL points to Postgres
 ```
 
 ## Layout
