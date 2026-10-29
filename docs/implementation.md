@@ -12,6 +12,7 @@ Contents
 5. [Request flow: the agent graph](#5-request-flow-the-agent-graph)
 6. [Hallucination prevention](#6-hallucination-prevention)
 7. [Guardrails and access control](#7-guardrails-and-access-control)
+   - [7A. Identity: authentication and authorization](#7a-identity-authentication-and-authorization)
 8. [Model selection](#8-model-selection)
 9. [Data model and Qdrant storage](#9-data-model-and-qdrant-storage)
 10. [HTTP API reference](#10-http-api-reference)
@@ -75,7 +76,9 @@ ai-application/
 │   │   │   ├── pipeline.py      IngestionPipeline: 7 observable stages emitting events
 │   │   │   ├── ingest.py        IngestionService (blocking use, directory loading)
 │   │   │   └── text.py          Front-matter parsing, text cleaning
-│   │   ├── auth.py              Demo users, JWT, role dependencies
+│   │   ├── auth/                Passwords, JWT, repositories, services, deps, REST router
+│   │   ├── db/                  SQLAlchemy models (schema `auth`), sessions, bootstrap, CLI
+│   ├── alembic/                 Migration 0001 (auth schema)
 │   │   ├── config.py            Settings, ModelSpec, default model list
 │   │   ├── container.py         Composition root (dependency wiring)
 │   │   ├── domain.py            Framework-free dataclasses
@@ -201,8 +204,24 @@ Front-matter format (read by `ingest_directory`; stripped from uploaded text in 
 ### 4.10 `agents/graph.py`: `PolicyAgent`
 Constructed with a guard, a store, a `resolve_generator` callable, a verifier and thresholds; compiles the LangGraph on construction. `run(question, role, model_id)` returns the final `AgentState`. See the next section.
 
-### 4.11 `auth.py`
-Five demo users (`alice` employee, `mark` manager, `hannah` hr, `carl` compliance, `root` admin). `create_token` issues an HS256 JWT with `sub, name, role, department, exp`. `current_user` is a FastAPI dependency that validates the bearer token; `require_roles(*roles)` builds a role-checking dependency. **Demo only**: passwords are in source and the secret defaults to a dev value.
+### 4.11 Identity: database, authentication and authorization (`db/`, `auth/`)
+Users, roles and sessions live in **PostgreSQL, schema `auth`**. The full design is in
+[section 7A](#7a-identity-authentication-and-authorization); in short:
+
+| Module | Responsibility |
+|---|---|
+| `db/base.py`, `db/models.py` | SQLAlchemy models for the `auth` schema (roles, permissions, users, refresh tokens, audit log) |
+| `db/session.py` | `Database` (engine and sessions), per-request `get_session` dependency |
+| `db/bootstrap.py`, `db/manage.py` | Run migrations, seed roles/permissions/demo users, `create-admin` CLI |
+| `alembic/` | Migration `0001` creating the schema |
+| `auth/constants.py` | Role definitions with access levels, permissions, role-to-permission map, demo users |
+| `auth/passwords.py` | `PasswordHasher` protocol, Argon2 implementation, password policy |
+| `auth/tokens.py` | JWT access tokens and opaque refresh tokens (`TokenService`) |
+| `auth/repositories.py` | `UserRepository`, `RoleRepository`, `RefreshTokenRepository`, `AuditRepository` |
+| `auth/service.py` | `AuthService` (login, refresh, logout, change password) and `UserAdminService` (user CRUD) |
+| `auth/deps.py` | FastAPI dependencies: `current_user`, `require_permission`, `require_level`, `require_roles` |
+| `auth/router.py` | REST routes for `/auth/*`, `/api/me`, `/api/users`, `/api/roles`, `/api/audit-log` |
+| `auth/errors.py`, `auth/schemas.py` | Framework-free service errors (carry an HTTP status) and request/response models |
 
 ### 4.12 `container.py`: composition root
 `Container(settings)` builds the Qdrant client (server if `QDRANT_URL`, otherwise embedded at `QDRANT_PATH`), the embeddings via the registry, the store, ingestion service, model catalog and `PolicyAgent`. `get_container()` is `lru_cache`d and used as the FastAPI dependency, so tests and alternative deployments can substitute it.
@@ -267,11 +286,94 @@ What this does *not* yet do: semantic claim-by-claim entailment checking (a cita
 | Retrieved-text handling | prompt design | Sources are inserted as data under "Sources"; the system prompt restricts the model to them. Document-side injection scanning is not yet implemented. |
 | Document RBAC | `QdrantPolicyStore.search` | Role filter enforced inside Qdrant; document-level `allowed_roles`. |
 | Version/status filter | `QdrantPolicyStore.search` | Only `status == "active"` chunks are retrievable. |
-| Endpoint RBAC | `require_roles` | Document list/upload/delete require `admin`, `hr` or `compliance`. |
-| Authentication | `current_user` | Bearer JWT on every route except `/auth/login` and `/health`. |
+| Endpoint permissions | `require_permission` | `documents:manage` for document endpoints, `chat:use` for chat and models, `users:*` and `audit:read` for administration. |
+| Authentication | `current_user` | Bearer JWT on every route except `/auth/login`, `/auth/refresh`, `/auth/logout` and `/health`. |
 
-Roles: `employee, manager, hr, compliance, admin`. A document's `allowed_roles` of `all` means everyone.
-Role hierarchy is not inferred: a document restricted to `hr` is not visible to `admin` unless `admin` is listed.
+A document's `allowed_roles` of `all` means everyone. Retrieval filters on the **role name**; role levels are not
+used for document access, so a document restricted to `hr` is not visible to `admin` unless `admin` is listed.
+
+## 7A. Identity: authentication and authorization
+
+### 7A.1 Schema (`auth`, PostgreSQL)
+
+```mermaid
+erDiagram
+  roles ||--o{ users : "role_id"
+  roles ||--o{ role_permissions : ""
+  permissions ||--o{ role_permissions : ""
+  users ||--o{ users : "manager_id"
+  users ||--o{ refresh_tokens : "user_id"
+  users ||--o{ audit_log : "user_id"
+```
+
+| Table | Key columns |
+|---|---|
+| `roles` | `id`, `name` (unique), **`level`** (access level), `description` |
+| `permissions` | `id`, `code` (unique, e.g. `users:manage`), `description` |
+| `role_permissions` | `role_id`, `permission_id` (composite key, cascade delete) |
+| `users` | `id` (UUID), `username` (unique, check: lowercase), `email` (unique, optional), `full_name`, `password_hash` (Argon2), `role_id`, `department`, `manager_id` (self reference, set null), `is_active`, `failed_login_attempts`, `locked_until`, `last_login_at`, `password_changed_at`, `created_at`, `updated_at` |
+| `refresh_tokens` | `id`, `user_id` (cascade), `token_hash` (unique SHA-256), `family_id`, `expires_at`, `revoked_at`, `ip_address`, `user_agent` |
+| `audit_log` | `id` (identity), `user_id` (set null), `username`, `action`, `success`, `ip_address`, `detail` (JSONB), `created_at` |
+
+All timestamps are `timestamptz`. Constraint and index names follow a naming convention, and a test
+(`test_schema.py`) checks that the Alembic migration and the models define identical tables, constraints and indexes.
+
+### 7A.2 Access levels, roles and permissions
+
+Access is two layered: a role has a numeric **level** (broader access, higher number) and a set of **permissions**
+(what it may do). Endpoints check permissions; `require_level(n)` is available for rank-based checks.
+
+| Role | Level | Permissions |
+|---|---|---|
+| `employee` | 10 | `chat:use` |
+| `manager` | 20 | `chat:use` |
+| `hr` | 30 | `chat:use`, `documents:manage`, `users:read` |
+| `compliance` | 30 | `chat:use`, `documents:manage`, `users:read`, `audit:read` |
+| `admin` | 100 | all of the above plus `users:manage` |
+
+The definitions live in `auth/constants.py` and are upserted into the database at startup (`seed_reference_data`), so
+changing a role's permissions is a code change plus restart. Adding a new role also requires adding it to `ROLE_NAMES`,
+which validates document `allowed_roles`.
+
+### 7A.3 Token model
+
+| Token | Format | Lifetime | Storage |
+|---|---|---|---|
+| Access | HS256 JWT: `iss, sub` (user id), `username, role, level, type=access, jti, iat, exp` | 15 min (`ACCESS_TOKEN_MINUTES`) | Client only |
+| Refresh | 48 random bytes, URL-safe | 7 days (`REFRESH_TOKEN_DAYS`) | Server stores only its SHA-256 hash |
+
+- **Validation on every request.** `current_user` verifies signature, issuer, expiry and `type`, then **re-reads the user from the database**. Role changes, deactivation and permission changes therefore apply immediately, without waiting for token expiry.
+- **Password change invalidates old tokens.** An access token whose `iat` is earlier than the user's `password_changed_at` is rejected (second resolution).
+- **Refresh rotation.** Each `/auth/refresh` revokes the presented token and issues a new pair in the same `family_id`. Presenting an already-used token is treated as theft: the whole family is revoked and the attempt is audited as `refresh_reuse_detected`. Two simultaneous refreshes with the same token can trigger this (the web client serializes them).
+- **Logout** revokes the token's family; `logout-all`, password change, password reset and deactivation revoke every refresh token of the user.
+
+### 7A.4 Login protections
+- Passwords are hashed with **Argon2id** (`argon2-cffi` defaults), and rehashed on login if parameters change.
+- **Account lockout:** after `MAX_FAILED_LOGINS` (5) consecutive failures the account is locked for `LOCKOUT_MINUTES` (15); locked logins return 423 even with the right password. A successful login resets the counter.
+- Unknown usernames and wrong passwords return the **same 401 body**, and a dummy hash is verified for unknown users so response time does not reveal which usernames exist.
+- **Password policy** for new passwords: at least `PASSWORD_MIN_LENGTH` (10) characters, at most 128, not containing the username, not letters-only or digits-only. Seeded demo accounts bypass it.
+- The client IP recorded is the direct peer address; `X-Forwarded-For` is ignored because it is client-controlled. Behind a trusted reverse proxy, configure the proxy-aware address handling in the server instead.
+
+### 7A.5 Administration rules
+- Only holders of `users:manage` create, update, deactivate users or reset passwords.
+- A user **cannot change their own role or deactivate themselves**, which prevents an admin from locking the system out.
+- `DELETE /api/users/{id}` is a **soft delete** (`is_active=false` plus session revocation) so history and the audit trail stay intact; re-activate with `PATCH {"is_active": true}`.
+- Manager assignments are validated: the manager must exist, cannot be the user, and cannot create a reporting cycle.
+- Username and email uniqueness is enforced by the database (409 on conflict; emails are compared case-insensitively).
+- Every login outcome, refresh, logout, password change and administrative action is written to `audit_log` with the actor, target, IP and details. Passwords and tokens are never logged.
+
+### 7A.6 Bootstrapping
+1. Start Postgres (`docker compose up -d postgres`) or point `DATABASE_URL` at your own server.
+2. The API applies Alembic migrations on startup (`AUTO_MIGRATE=true`), or run `python -m app.db.manage migrate`.
+3. With `SEED_DEMO_USERS=true` and an empty users table, five demo accounts are created for local development.
+   In any shared environment set `SEED_DEMO_USERS=false` and create the first administrator with
+   `python -m app.db.manage create-admin --username <name> --email <email>` (prompts for the password).
+
+### 7A.7 Testing without Postgres
+The suite runs on a throwaway **SQLite** file by default (the `auth` schema is mapped away), so it works offline. Set
+`TEST_DATABASE_URL=postgresql+psycopg://...` to run the same suite against Postgres. Postgres-specific parts (the
+migration, `JSONB`, identity columns) are covered offline by the schema-drift test only; they should also be run
+against a real server.
 
 ## 8. Model selection
 
@@ -320,13 +422,27 @@ Vector: dense, cosine, dimension from the embedder (384 for bge-small). Embedded
 
 ## 10. HTTP API reference
 
-All routes except `/auth/login` and `/health` need `Authorization: Bearer <token>`.
+Routes need `Authorization: Bearer <access token>` except `/auth/login`, `/auth/refresh`, `/auth/logout` and `/health`.
+Authentication and user administration are described in [section 7A](#7a-identity-authentication-and-authorization); the
+tables below list every route.
 
 | Method and path | Role | Description |
 |---|---|---|
-| `POST /auth/login` | none | Body `{username, password}`. Returns `{access_token}`. 401 on bad credentials. |
-| `GET /api/me` | any | Current user `{id, name, role, department}`. |
-| `GET /api/models` | any | `{default, models: [{id, label, provider}]}`. |
+| `POST /auth/login` | none | Body `{username, password}`. Returns `{access_token, refresh_token, token_type, expires_in, user}`. 401 bad credentials (same body for unknown user), 403 disabled account, 423 locked. |
+| `POST /auth/refresh` | none | Body `{refresh_token}`. Rotates: returns a new token pair and revokes the old refresh token. 401 if invalid, expired, revoked or replayed (replay revokes the whole chain). |
+| `POST /auth/logout` | none | Body `{refresh_token}`. Revokes the session. Always 204 (idempotent). |
+| `POST /auth/logout-all` | any user | Revokes every refresh token of the caller. 204. |
+| `POST /auth/change-password` | any user | Body `{current_password, new_password}`. 204; signs out all sessions. 401 wrong current password, 422 policy violation. |
+| `GET /api/me` | any user | `{id, username, name, role, level, department, permissions}`, rebuilt from the database. |
+| `GET /api/users` | `users:read` | Query `q`, `role`, `active`, `offset`, `limit` (1-200). Returns `{items, total, offset, limit}`. |
+| `POST /api/users` | `users:manage` | Body `{username, password, full_name, email?, role?, department?, manager_id?}`. 201. 409 duplicate, 422 validation. |
+| `GET /api/users/{id}` | `users:read` | One user. 404 if unknown. |
+| `PATCH /api/users/{id}` | `users:manage` | Partial update of `full_name, email, role, department, manager_id, is_active`. 403 when changing your own role or active flag. |
+| `DELETE /api/users/{id}` | `users:manage` | Soft delete (deactivate and revoke sessions). Returns the user. |
+| `POST /api/users/{id}/reset-password` | `users:manage` | Body `{new_password}`. 204; signs the user out everywhere. |
+| `GET /api/roles` | `users:read` | Roles with level and permissions. |
+| `GET /api/audit-log` | `audit:read` | Query `action`, `username`, `offset`, `limit`. Newest first. |
+| `GET /api/models` | `chat:use` | `{default, models: [{id, label, provider}]}`. |
 | `POST /api/chat` | any | Body `{question, model_id?}`. See response below. |
 | `GET /api/documents` | admin, hr, compliance | Documents with chunk counts. |
 | `POST /api/documents` | admin, hr, compliance | Multipart: `file`, `title`, `doc_id`, `department`, `version`, `allowed_roles` (comma list or `all`), `status` (`active`, `inactive`, `draft`). Re-using a `doc_id` replaces the document. Returns `{doc_id, chunks}`. 400 for invalid metadata, unsupported file types or other pipeline failures. |
@@ -349,7 +465,7 @@ All routes except `/auth/login` and `/health` need `Authorization: Bearer <token
 ```
 When `abstained` is true, `answer` is the fixed fallback message and `sources` is empty.
 
-Error codes: 400 unknown model or file type, 401 missing/invalid token, 403 insufficient role, 503 model
+Error codes: 400 unknown model or file type, 401 missing/invalid token, 403 missing permission, 423 locked account, 503 model
 unavailable.
 
 Example:
@@ -378,8 +494,15 @@ Set as environment variables or in `backend/.env` (see `.env.example`). Names ar
 | `MIN_CITATION_COVERAGE` | 0.6 | Minimum share of cited sentences |
 | `MAX_GENERATION_ATTEMPTS` | 2 | Generate/verify loop bound |
 | `CHUNK_SIZE` / `CHUNK_OVERLAP` | 900 / 150 | Chunking in characters |
-| `JWT_SECRET` | `dev-only-change-me` | **Change outside local development** |
-| `JWT_EXPIRE_MINUTES` | 480 | Token lifetime |
+| `DATABASE_URL` | `postgresql+psycopg://policy:policy@localhost:5432/policy_copilot` | Identity database; a `sqlite:///` URL works for tests and offline development |
+| `AUTO_MIGRATE` | true | Apply Alembic migrations (Postgres) or create tables (SQLite) at startup |
+| `SEED_DEMO_USERS` | true | Create the five demo users when the users table is empty. Set false outside local development |
+| `JWT_SECRET` | `dev-only-change-me` | **Change outside local development** (a startup warning is logged while it is the default) |
+| `JWT_ISSUER` | `policy-copilot` | `iss` claim, verified on every request |
+| `ACCESS_TOKEN_MINUTES` | 15 | Access token lifetime |
+| `REFRESH_TOKEN_DAYS` | 7 | Refresh token lifetime |
+| `MAX_FAILED_LOGINS` / `LOCKOUT_MINUTES` | 5 / 15 | Account lockout |
+| `PASSWORD_MIN_LENGTH` | 10 | Minimum length for new passwords |
 | `SAMPLE_DOCS_DIR` | `backend/data/sample_docs` | Startup ingestion source |
 | `AUTOLOAD_SAMPLES` | true | Ingest samples when the collection is empty |
 | `CORS_ORIGINS` | `["http://localhost:5173"]` | Allowed browser origins (JSON list) |
@@ -432,7 +555,7 @@ The token lives in `sessionStorage` (cleared when the tab closes). Chat history 
 ## 14. Testing
 
 ```bash
-cd backend && .venv/Scripts/python -m pytest      # 25 tests
+cd backend && .venv/Scripts/python -m pytest      # 51 tests
 ```
 
 `tests/conftest.py` sets environment variables **before** importing the app: `EMBEDDING_PROVIDER=hash`,
@@ -444,9 +567,12 @@ cd backend && .venv/Scripts/python -m pytest      # 25 tests
 | `test_units.py` | Chunk sizing and section breadcrumbs; verifier accept/reject cases (no citation, bad index, ungrounded number, abstain); injection guard; extractive citations; `Registry`; `ModelCatalog` default and caching |
 | `test_api.py` | Auth required; model list; grounded cited answer; off-topic abstention; injection blocked; unknown model 400; **RBAC** (employee cannot see the HR-restricted document, HR can); document endpoints restricted by role |
 | `test_pipeline.py` | Text cleaning and front matter; all seven stages emitted in order with JSON-serializable events; chunk, embedding (384 dims, 8-value preview), store and verify details; re-ingest replaces rather than duplicates; pipeline stops at the failing stage (unsupported type, empty file); inactive documents skip self-retrieval; an ingested document is found by chat; `/api/documents/ingest` returns NDJSON, reports failures in-stream, enforces RBAC and validates `doc_id`, roles and status; delete removes chunks |
+| `test_auth.py` | Login (tokens, claims, case-insensitive username, identical errors for unknown user and wrong password); lockout and counter reset; 9 forged or invalid token cases (expired, wrong secret, wrong issuer, wrong type, unknown user, `alg=none`, refresh token as bearer, garbage); refresh rotation and replay detection; logout and logout-all; change password and admin reset (old tokens and sessions die); role-and-permission matrix across employee, HR, compliance and admin; 401 versus 403; immediate effect of role change and deactivation; self-lockout protection; user validation (policy, duplicates, roles, managers, cycles); filtering and pagination; audit log contents |
+| `test_schema.py` | Alembic migration and SQLAlchemy models define the same tables, constraints and indexes (offline SQL generation); everything is in the `auth` schema |
 
 Not covered by automated tests: the Ollama path (needs a running server), real-embedding relevance, the
-frontend, and PDF parsing. Verified manually: the full chat flow and the ingestion flow in the browser with real
+frontend, PDF parsing, and **execution of the migration and Postgres-specific behavior against a real Postgres server**
+(the suite uses SQLite unless `TEST_DATABASE_URL` is set). Verified manually: the full chat flow and the ingestion flow in the browser with real
 embeddings (HR user uploads a markdown file, watches the seven stages, then asks a question about it).
 
 ## 15. Running and operating
@@ -456,7 +582,7 @@ See the [README](../README.md) for setup commands. Operational notes:
 - Embedded Qdrant allows one process; run `uvicorn` with a single worker or switch to the Qdrant server.
 - With Ollama, run `ollama pull llama3.1:8b` (or the models you configure). Responses take seconds on CPU.
 - Port 8010 is used for the API to avoid clashing with other local apps on 8000.
-- Do not deploy as-is: replace the demo users and `JWT_SECRET`, restrict CORS, and add TLS.
+- Do not deploy as-is: set `SEED_DEMO_USERS=false`, create an administrator with `create-admin`, set a strong `JWT_SECRET`, restrict CORS, and add TLS (and a proxy-aware client-IP setup if behind a reverse proxy).
 
 ## 16. Known limitations and roadmap
 
@@ -469,7 +595,7 @@ See the [README](../README.md) for setup commands. Operational notes:
 | One agent graph; no router, HR-operations or escalation agents | Phase 3 |
 | Regex-only guardrails; no PII redaction, no document-side injection scanning | Phase 4 |
 | Observability is the per-request trace only; no persistence, cost or quality metrics | Phase 5 (Langfuse or Phoenix, audit log, dashboard) |
-| Demo auth, in-memory chat history, no admin UI | Phase 3 to 6 |
+| In-memory chat history; no admin UI for users (the REST API exists); no per-IP rate limiting, MFA or OIDC | Phase 3 to 6 |
 | No evaluation suite in CI | Phase 2 |
 
 ## 17. Requirements traceability
@@ -489,12 +615,13 @@ Status of the requirement IDs in [requirements-analysis.md](requirements-analysi
 | FR-HAL-5, 6, 8 | Partial / not started | Score and version shown; no conflicts or feedback |
 | FR-AGT-7, 8 | Done | Explicit graph, bounded attempts |
 | FR-AGT-1 to 6, 9 | Not started | Router, HR-ops, escalation, approvals |
-| FR-GRD-1, 4 | Done / partial | Regex injection check; document and endpoint RBAC |
+| FR-GRD-1, 4 | Done / partial | Regex injection check; document RBAC and permission-based endpoint checks |
 | FR-GRD-2, 3, 5 to 8 | Not started | |
 | FR-OBS-1 | Partial | Step trace per request |
 | FR-OBS-2 to 8 | Not started | |
 | FR-UI-1 (streaming) | Partial | Chat without streaming |
 | FR-UI-2, 3, 7 | Partial | Citations and source view, step trace; no feedback button |
 | FR-UI-5 | Partial | Document upload, list and delete with live ingestion steps; no version history or guardrail settings |
-| FR-AUTH-1 to 3 | Partial | Demo JWT, five roles, claims drive filters |
+| FR-AUTH-1 | Partial | Database-backed JWT login with refresh rotation; no OIDC |
+| FR-AUTH-2, 3 | Done | Five roles with access levels and permissions in Postgres; role name drives retrieval filters, permissions gate endpoints |
 | NFR-8, 9 | Partial | Typed, modular; tests exist; Docker Compose provides Qdrant and Ollama only |

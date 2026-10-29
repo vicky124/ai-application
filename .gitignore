@@ -9,3 +9,4 @@ dist/
 .pytest_cache/
 backend/data/qdrant/
 qdrant_storage/
+*.db

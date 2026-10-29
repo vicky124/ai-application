@@ -9,7 +9,8 @@ Built on open-source models: local embeddings via FastEmbed and LLMs served by O
 | RAG | LangChain + Qdrant, heading-aware chunking, status and role filters at query time |
 | Hallucination prevention | Mandatory citations, rule-based verifier (citation validity, coverage, numbers present in sources), bounded retry, abstain |
 | Multi-agent orchestration | LangGraph state graph (guard, retrieve, generate, verify, abstain); more agents planned |
-| Guardrails | Prompt-injection check, RBAC on retrieval and admin endpoints |
+| Guardrails | Prompt-injection check, RBAC on retrieval, permission-checked endpoints |
+| Identity | PostgreSQL `auth` schema, JWT access + rotating refresh tokens, Argon2 passwords, lockout, access levels, audit log |
 | Observability | Per-request step trace returned to the UI; Langfuse/Phoenix planned |
 
 ## Documentation
@@ -19,6 +20,13 @@ Built on open-source models: local embeddings via FastEmbed and LLMs served by O
 ## Status
 **Phase 1 (foundation) done:** ingestion, RAG with citations, abstention, RBAC, model selection, React chat UI.
 See [docs/requirements-analysis.md](docs/requirements-analysis.md) for the full roadmap.
+
+## Authentication and authorization
+Users, roles and sessions are stored in PostgreSQL (schema `auth`). Roles carry an access **level** and a set of
+**permissions**; endpoints check permissions. Login returns a 15-minute JWT and a rotating refresh token; accounts lock
+after repeated failures; every security event is audited. REST endpoints: `/auth/login|refresh|logout|logout-all|change-password`
+and `/api/me|users|roles|audit-log` (interactive docs at http://localhost:8010/docs). Details in the
+[implementation guide](docs/implementation.md#7a-identity-authentication-and-authorization).
 
 ## Ingestion pipeline with live steps
 HR, compliance and admin users get an **Ingestion** tab. Upload a `.md`, `.txt` or `.pdf` file and watch seven stages
@@ -41,8 +49,19 @@ pipeline is available as a streaming API: `POST /api/documents/ingest`. See the
 - **Dependency inversion:** the agent and ingestion service depend on those Protocols; [`app/container.py`](backend/app/container.py) is the only composition root.
 
 ## Run locally
-Prerequisites: Python 3.11+, Node 18+. Optional: [Ollama](https://ollama.com) (`ollama pull llama3.1:8b`) and Docker.
+Prerequisites: Python 3.11+, Node 18+, **PostgreSQL 14+** (for users), and optionally [Ollama](https://ollama.com)
+(`ollama pull llama3.1:8b`).
 
+**1. Database.** Either `docker compose up -d postgres`, or on an existing server create a database and role
+(run as a superuser):
+```sql
+CREATE ROLE policy LOGIN PASSWORD 'policy';
+CREATE DATABASE policy_copilot OWNER policy;
+```
+Use a different URL via `DATABASE_URL` (see `backend/.env.example`). The schema and tables are created by migration at startup.
+
+
+**2. Backend and frontend**
 ```bash
 cd backend
 python -m venv .venv
@@ -56,7 +75,10 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173. Demo logins: `alice/alice123` (employee), `mark/mark123` (manager), `hannah/hannah123` (HR).
+Open http://localhost:5173. On first start with an empty users table, demo accounts are created (local development only,
+`SEED_DEMO_USERS=false` disables it): `alice/alice123` (employee), `mark/mark123` (manager), `hannah/hannah123` (HR),
+`carl/carl123` (compliance), `root/root123` (admin). Create a real administrator with
+`python -m app.db.manage create-admin --username <name>`.
 Without Ollama, pick "No LLM (extractive, offline)". The first start downloads the embedding model and indexes `backend/data/sample_docs`.
 
 Optional services (Qdrant server, Ollama): `docker compose up -d`, then set `QDRANT_URL` (see `backend/.env.example`).
@@ -64,7 +86,7 @@ Optional services (Qdrant server, Ollama): `docker compose up -d`, then set `QDR
 ## Tests
 ```bash
 cd backend
-.venv/Scripts/python -m pytest
+.venv/Scripts/python -m pytest        # 51 tests; uses SQLite unless TEST_DATABASE_URL points to Postgres
 ```
 
 ## Layout

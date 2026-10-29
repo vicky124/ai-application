@@ -51,8 +51,18 @@ class Settings(BaseSettings):
     chunk_size: int = 900
     chunk_overlap: int = 150
 
+    # Identity database (schema "auth"). Use a SQLite URL (sqlite:///file.db) only for tests/offline dev.
+    database_url: str = "postgresql+psycopg://policy:policy@localhost:5432/policy_copilot"
+    auto_migrate: bool = True  # run Alembic migrations (Postgres) or create tables (SQLite) at startup
+    seed_demo_users: bool = True  # create alice/mark/hannah/carl/root when the users table is empty
+
     jwt_secret: str = "dev-only-change-me"
-    jwt_expire_minutes: int = 480
+    jwt_issuer: str = "policy-copilot"
+    access_token_minutes: int = 15
+    refresh_token_days: int = 7
+    max_failed_logins: int = 5
+    lockout_minutes: int = 15
+    password_min_length: int = 10
 
     sample_docs_dir: str = str(BASE_DIR / "data" / "sample_docs")
     autoload_samples: bool = True

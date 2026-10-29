@@ -13,7 +13,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [view, setView] = useState("chat");
   const endRef = useRef(null);
-  const canIngest = ["admin", "hr", "compliance"].includes(user?.role);
+  const canIngest = Boolean(user?.permissions?.includes("documents:manage"));
 
   useEffect(() => {
     if (api.hasToken()) loadSession().catch(() => api.logout());

@@ -1,33 +1,88 @@
-let token = sessionStorage.getItem("token");
+// Tokens live in sessionStorage (cleared when the tab closes). For production, prefer an httpOnly
+// cookie for the refresh token so scripts cannot read it.
+let accessToken = sessionStorage.getItem("access_token");
+let refreshToken = sessionStorage.getItem("refresh_token");
+let refreshing = null; // single in-flight refresh shared by concurrent requests
+
+function saveTokens(data) {
+  accessToken = data.access_token;
+  refreshToken = data.refresh_token;
+  sessionStorage.setItem("access_token", accessToken);
+  sessionStorage.setItem("refresh_token", refreshToken);
+}
+
+function clearTokens() {
+  accessToken = refreshToken = null;
+  sessionStorage.removeItem("access_token");
+  sessionStorage.removeItem("refresh_token");
+}
+
+async function errorFrom(res) {
+  const body = await res.json().catch(() => ({}));
+  const detail = Array.isArray(body.detail) ? body.detail.map((d) => d.msg).join("; ") : body.detail;
+  const err = new Error(detail || `Request failed (${res.status})`);
+  err.status = res.status;
+  return err;
+}
+
+async function refreshAccessToken() {
+  if (!refreshToken) return false;
+  refreshing ??= fetch("/auth/refresh", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  })
+    .then(async (res) => {
+      if (!res.ok) return false;
+      saveTokens(await res.json());
+      return true;
+    })
+    .catch(() => false)
+    .finally(() => {
+      refreshing = null;
+    });
+  return refreshing;
+}
+
+// fetch with the bearer token; on 401 it refreshes once and retries.
+async function authFetch(path, options = {}) {
+  const send = () =>
+    fetch(path, { ...options, headers: { ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}), ...options.headers } });
+  let res = await send();
+  if (res.status === 401 && (await refreshAccessToken())) res = await send();
+  if (res.status === 401) clearTokens();
+  return res;
+}
 
 async function request(path, options = {}) {
-  const res = await fetch(path, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options.headers,
-    },
-  });
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    const err = new Error(body.detail || `Request failed (${res.status})`);
-    err.status = res.status;
-    throw err;
-  }
-  return res.json();
+  const res = await authFetch(path, { ...options, headers: { "Content-Type": "application/json", ...options.headers } });
+  if (!res.ok) throw await errorFrom(res);
+  return res.status === 204 ? null : res.json();
 }
 
 export const api = {
-  hasToken: () => Boolean(token),
+  hasToken: () => Boolean(accessToken),
   async login(username, password) {
-    const data = await request("/auth/login", { method: "POST", body: JSON.stringify({ username, password }) });
-    token = data.access_token;
-    sessionStorage.setItem("token", token);
+    const res = await fetch("/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+    if (!res.ok) throw await errorFrom(res);
+    const data = await res.json();
+    saveTokens(data);
+    return data.user;
   },
-  logout() {
-    token = null;
-    sessionStorage.removeItem("token");
+  async logout() {
+    const token = refreshToken;
+    clearTokens();
+    if (token) {
+      await fetch("/auth/logout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh_token: token }),
+      }).catch(() => {});
+    }
   },
   me: () => request("/api/me"),
   models: () => request("/api/models"),
@@ -38,15 +93,8 @@ export const api = {
 
   // Runs the ingestion pipeline and calls onEvent for each NDJSON event as it arrives.
   async ingest(formData, onEvent) {
-    const res = await fetch("/api/documents/ingest", {
-      method: "POST",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      body: formData,
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(body.detail || `Request failed (${res.status})`);
-    }
+    const res = await authFetch("/api/documents/ingest", { method: "POST", body: formData });
+    if (!res.ok) throw await errorFrom(res);
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
