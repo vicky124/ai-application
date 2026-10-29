@@ -33,4 +33,34 @@ export const api = {
   models: () => request("/api/models"),
   chat: (question, model_id) =>
     request("/api/chat", { method: "POST", body: JSON.stringify({ question, model_id }) }),
+  documents: () => request("/api/documents"),
+  deleteDocument: (docId) => request(`/api/documents/${encodeURIComponent(docId)}`, { method: "DELETE" }),
+
+  // Runs the ingestion pipeline and calls onEvent for each NDJSON event as it arrives.
+  async ingest(formData, onEvent) {
+    const res = await fetch("/api/documents/ingest", {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || `Request failed (${res.status})`);
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buffer.indexOf("\n")) >= 0) {
+        const line = buffer.slice(0, nl).trim();
+        buffer = buffer.slice(nl + 1);
+        if (line) onEvent(JSON.parse(line));
+      }
+    }
+    if (buffer.trim()) onEvent(JSON.parse(buffer));
+  },
 };

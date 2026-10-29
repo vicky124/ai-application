@@ -1,4 +1,6 @@
 """Qdrant-backed VectorStore built on langchain-qdrant. Enforces status + role filters at query time."""
+import uuid
+
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_qdrant import QdrantVectorStore
@@ -31,6 +33,21 @@ class QdrantPolicyStore:
     def add(self, docs: list[Document]) -> None:
         if docs:
             self._vs.add_documents(docs)
+
+    def add_vectors(self, docs: list[Document], vectors: list[list[float]]) -> list[str]:
+        """Upsert pre-computed vectors using the same payload layout langchain-qdrant reads back."""
+        ids = [str(uuid.uuid4()) for _ in docs]
+        points = [
+            models.PointStruct(id=pid, vector=vec, payload={"page_content": d.page_content, "metadata": d.metadata})
+            for pid, vec, d in zip(ids, vectors, docs)
+        ]
+        self._client.upsert(self._collection, points=points)
+        return ids
+
+    def count_chunks(self, doc_id: str) -> int:
+        return self._client.count(
+            self._collection, count_filter=models.Filter(must=[_eq("doc_id", doc_id)]), exact=True
+        ).count
 
     def search(self, query: str, role: str, k: int) -> list[Source]:
         flt = models.Filter(

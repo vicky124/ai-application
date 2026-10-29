@@ -10,6 +10,7 @@ from app.providers.generators import ModelCatalog
 from app.rag.embeddings import EMBEDDINGS
 from app.rag.ingest import IngestionService
 from app.rag.parsers import default_parsers
+from app.rag.pipeline import IngestionPipeline
 from app.rag.store import QdrantPolicyStore
 
 
@@ -19,7 +20,16 @@ class Container:
         client = QdrantClient(url=cfg.qdrant_url) if cfg.qdrant_url else QdrantClient(path=cfg.qdrant_path)
         embeddings = EMBEDDINGS.create(cfg.embedding_provider, model=cfg.embedding_model)
         self.store = QdrantPolicyStore(client, cfg.collection_name, embeddings)
-        self.ingestion = IngestionService(self.store, default_parsers(), cfg.chunk_size, cfg.chunk_overlap)
+        self.pipeline = IngestionPipeline(
+            index=self.store,
+            parsers=default_parsers(),
+            embeddings=embeddings,
+            embedding_label=f"{cfg.embedding_provider}:{cfg.embedding_model}",
+            collection=cfg.collection_name,
+            chunk_size=cfg.chunk_size,
+            chunk_overlap=cfg.chunk_overlap,
+        )
+        self.ingestion = IngestionService(self.pipeline)
         self.models = ModelCatalog(cfg.models, cfg)
         self.agent = PolicyAgent(
             guard=RegexInputGuard(),

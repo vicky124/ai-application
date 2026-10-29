@@ -1,10 +1,13 @@
+import json
+import re
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app.auth import User, authenticate, current_user, require_roles
+from app.auth import ROLES, User, authenticate, current_user, require_roles
 from app.config import settings
 from app.container import Container, get_container
 from app.domain import DocumentMeta
@@ -90,6 +93,22 @@ def documents(user: User = Depends(DocAdmin), c: Container = Depends(get_contain
     return c.store.list_documents()
 
 
+DOC_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{1,60}$")
+VALID_STATUS = ("active", "inactive", "draft")
+
+
+def build_meta(title: str, doc_id: str, department: str, version: str, allowed_roles: str, status: str) -> DocumentMeta:
+    if not DOC_ID_RE.match(doc_id):
+        raise HTTPException(400, "doc_id must be 2-61 chars: lowercase letters, digits, '-' or '_'")
+    if status not in VALID_STATUS:
+        raise HTTPException(400, f"status must be one of {VALID_STATUS}")
+    roles = [r.strip() for r in allowed_roles.split(",") if r.strip()]
+    bad = [r for r in roles if r != "all" and r not in ROLES]
+    if not roles or bad:
+        raise HTTPException(400, f"allowed_roles must be 'all' or a list of {list(ROLES)}")
+    return DocumentMeta(doc_id, title.strip() or doc_id, department, version, status, roles)
+
+
 @app.post("/api/documents")
 async def upload_document(
     file: UploadFile = File(...),
@@ -98,15 +117,40 @@ async def upload_document(
     department: str = Form("General"),
     version: str = Form("1.0"),
     allowed_roles: str = Form("all"),
+    status: str = Form("active"),
     user: User = Depends(DocAdmin),
     c: Container = Depends(get_container),
 ):
-    meta = DocumentMeta(doc_id, title, department, version, "active", [r.strip() for r in allowed_roles.split(",")])
+    meta = build_meta(title, doc_id, department, version, allowed_roles, status)
     try:
         n = c.ingestion.ingest_bytes(file.filename or "upload.txt", await file.read(), meta)
     except ValueError as e:
         raise HTTPException(400, str(e))
     return {"doc_id": doc_id, "chunks": n}
+
+
+@app.post("/api/documents/ingest")
+async def ingest_with_progress(
+    file: UploadFile = File(...),
+    title: str = Form(...),
+    doc_id: str = Form(...),
+    department: str = Form("General"),
+    version: str = Form("1.0"),
+    allowed_roles: str = Form("all"),
+    status: str = Form("active"),
+    user: User = Depends(DocAdmin),
+    c: Container = Depends(get_container),
+):
+    """Runs the ingestion pipeline and streams one JSON event per line (NDJSON) as each stage finishes."""
+    meta = build_meta(title, doc_id, department, version, allowed_roles, status)
+    data = await file.read()
+    filename = file.filename or "upload.txt"
+
+    def events():
+        for event in c.pipeline.run(filename, data, meta):
+            yield json.dumps(event) + "\n"
+
+    return StreamingResponse(events(), media_type="application/x-ndjson", headers={"Cache-Control": "no-store"})
 
 
 @app.delete("/api/documents/{doc_id}")

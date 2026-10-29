@@ -12,9 +12,20 @@ Built on open-source models: local embeddings via FastEmbed and LLMs served by O
 | Guardrails | Prompt-injection check, RBAC on retrieval and admin endpoints |
 | Observability | Per-request step trace returned to the UI; Langfuse/Phoenix planned |
 
+## Documentation
+- [Implementation guide](docs/implementation.md): architecture, modules, agent flow, API and config reference, extension guides, testing, limitations
+- [Requirements analysis](docs/requirements-analysis.md): scope, requirements, phases
+
 ## Status
 **Phase 1 (foundation) done:** ingestion, RAG with citations, abstention, RBAC, model selection, React chat UI.
 See [docs/requirements-analysis.md](docs/requirements-analysis.md) for the full roadmap.
+
+## Ingestion pipeline with live steps
+HR, compliance and admin users get an **Ingestion** tab. Upload a `.md`, `.txt` or `.pdf` file and watch seven stages
+run: receive, parse, clean, chunk, embed, store in Qdrant, verify. Each stage shows its details (chunk previews,
+embedding model and dimensions, a vector preview, collection and point IDs, and a self-retrieval check). The same
+pipeline is available as a streaming API: `POST /api/documents/ingest`. See the
+[implementation guide](docs/implementation.md#47-ingestion-pipeline-ragpipelinepy-ragingestpy-ragtextpy).
 
 ## Model selection
 - **Config level:** `ModelSpec` list in [`backend/app/config.py`](backend/app/config.py), or a JSON file via `MODELS_CONFIG`

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "./api.js";
+import IngestPage from "./components/IngestPage.jsx";
 import Login from "./components/Login.jsx";
 import Message from "./components/Message.jsx";
 
@@ -10,7 +11,9 @@ export default function App() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [view, setView] = useState("chat");
   const endRef = useRef(null);
+  const canIngest = ["admin", "hr", "compliance"].includes(user?.role);
 
   useEffect(() => {
     if (api.hasToken()) loadSession().catch(() => api.logout());
@@ -48,6 +51,7 @@ export default function App() {
     api.logout();
     setUser(null);
     setMessages([]);
+    setView("chat");
   }
 
   if (!user) {
@@ -65,17 +69,25 @@ export default function App() {
     <div className="app">
       <header>
         <h1>Policy &amp; HR Copilot</h1>
+        {canIngest && (
+          <nav className="tabs">
+            <button className={view === "chat" ? "tab active" : "tab"} onClick={() => setView("chat")}>Chat</button>
+            <button className={view === "ingest" ? "tab active" : "tab"} onClick={() => setView("ingest")}>Ingestion</button>
+          </nav>
+        )}
         <div className="controls">
-          <label>
-            Model{" "}
-            <select value={modelId} onChange={(e) => setModelId(e.target.value)}>
-              {models.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          {view === "chat" && (
+            <label>
+              Model{" "}
+              <select value={modelId} onChange={(e) => setModelId(e.target.value)}>
+                {models.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <span className="user">
             {user.name} · {user.role}
           </span>
@@ -85,6 +97,9 @@ export default function App() {
         </div>
       </header>
 
+      {view === "ingest" && canIngest && <IngestPage />}
+
+      {view === "chat" && (<>
       <main>
         {messages.length === 0 && (
           <p className="hint">
@@ -111,6 +126,7 @@ export default function App() {
         />
         <button disabled={busy || !input.trim()}>Send</button>
       </form>
+      </>)}
     </div>
   );
 }
