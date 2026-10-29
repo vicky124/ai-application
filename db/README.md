@@ -104,9 +104,37 @@ SELECT created_at, username, action, success, ip_address
 FROM auth.audit_log ORDER BY id DESC LIMIT 20;
 ```
 
+## Local cluster without Docker or admin rights
+
+How the development database on this project's machine was created (PostgreSQL 16 binaries installed, own data folder,
+port 5433). No Windows service and no superuser login are needed for the setup:
+
+```powershell
+# 1. new cluster (you type the superuser password at the prompt)
+& 'C:\Program Files\PostgreSQL\16\bin\initdb.exe' -D C:\PostgreSQL16-data -U postgres -W -A scram-sha-256 -E UTF8
+# 2. choose the port
+Add-Content C:\PostgreSQL16-data\postgresql.conf "port = 5433"
+# 3. create the app role and databases offline, in single-user mode (statements end at newline)
+#    CREATE ROLE policy LOGIN PASSWORD 'policy'
+#    CREATE DATABASE policy_copilot OWNER policy
+#    CREATE DATABASE policy_test OWNER policy
+#    fed to:  postgres.exe --single -D C:/PostgreSQL16-data postgres
+# 4. start it
+& 'C:\Program Files\PostgreSQL\16\bin\pg_ctl.exe' start -D C:\PostgreSQL16-data -l C:\PostgreSQL16-data\server.log
+```
+
+Then point the app at it in `backend/.env`:
+`DATABASE_URL=postgresql+psycopg://policy:policy@localhost:5433/policy_copilot`. A cluster started this way stops when the
+machine restarts; start it again with the last command, or register it as a service (needs admin).
+
 ## Verification status
 
-`sample_data.sql` is tested by running it against SQLite (it uses portable SQL) and checking row counts, foreign keys,
-manager links, role levels, idempotency and that every sample password verifies against its stored hash.
-`schema.sql` is rendered from the Alembic migration and checked against the models, but **neither script has been
-executed on a PostgreSQL server yet**.
+Verified on **PostgreSQL 16.15** (Windows):
+- `schema.sql` and `sample_data.sql` run cleanly; re-running `sample_data.sql` changes nothing (5 roles, 5 permissions,
+  14 role-permission rows, 9 users).
+- The Alembic migration builds an empty database from scratch, and `pg_dump --schema-only` of that database is identical to
+  the one built by `schema.sql`.
+- The full test suite (59 tests) passes against Postgres (`TEST_DATABASE_URL`), and the API logs in and serves
+  `/api/me` and `/api/users` from it.
+
+The sample data is also tested on SQLite (portable SQL) so the suite stays runnable without a server.

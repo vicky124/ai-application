@@ -59,7 +59,8 @@ CREATE ROLE policy LOGIN PASSWORD 'policy';
 CREATE DATABASE policy_copilot OWNER policy;
 ```
 Use a different URL via `DATABASE_URL` (see `backend/.env.example`). The schema and tables are created by migration at startup.
-Prefer plain SQL? The [db/](db/README.md) folder has `schema.sql`, `sample_data.sql` and `drop_schema.sql` for the same schema.
+Prefer plain SQL? The [db/](db/README.md) folder has `schema.sql`, `sample_data.sql` and `drop_schema.sql` for the same schema,
+plus steps for creating a local cluster without Docker or admin rights (port 5433; set `DATABASE_URL` in `backend/.env`).
 
 
 **2. Backend and frontend**

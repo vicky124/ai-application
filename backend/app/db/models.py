@@ -36,7 +36,7 @@ class UTCDateTime(sa.types.TypeDecorator):
         return value
 
 
-JsonType = sa.JSON().with_variant(JSONB(), "postgresql")
+JsonType = sa.JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql")  # None -> SQL NULL, not JSON null
 BigIntPk = sa.BigInteger().with_variant(sa.Integer(), "sqlite")  # SQLite only autoincrements INTEGER keys
 
 role_permissions = sa.Table(
