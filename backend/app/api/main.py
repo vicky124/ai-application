@@ -18,6 +18,7 @@ from app.container import Container, get_container
 from app.db.bootstrap import init_database
 from app.db.session import get_database
 from app.domain import DocumentMeta
+from app.providers.generators import ModelUnavailable
 
 
 @asynccontextmanager
@@ -56,32 +57,35 @@ class ChatRequest(BaseModel):
 def list_models(user: CurrentUser = Depends(ChatUser), c: Container = Depends(get_container)):
     return {
         "default": c.models.default_id,
-        "models": [{"id": m.id, "label": m.label, "provider": m.provider} for m in c.models.specs()],
+        "models": [c.models.describe(m) for m in c.models.specs()],
     }
 
 
 @app.post("/api/chat")
 def chat(body: ChatRequest, user: CurrentUser = Depends(ChatUser), c: Container = Depends(get_container)):
+    model_id = body.model_id or c.models.default_id
     try:
         c.models.get(body.model_id)
     except KeyError:
         raise HTTPException(400, f"Unknown model '{body.model_id}'")
+    except ModelUnavailable as e:  # e.g. missing API key; the reason is written by us, never provider output
+        raise HTTPException(503, f"Model '{model_id}' is unavailable: {e}")
     except Exception as e:  # provider could not be constructed
-        raise HTTPException(503, f"Model unavailable: {e}")
+        raise HTTPException(503, f"Model '{model_id}' could not be loaded ({type(e).__name__}).")
     try:
         state = c.agent.run(body.question, user.role, body.model_id)
-    except Exception as e:  # e.g. Ollama not running or model not pulled
+    except Exception as e:  # provider unreachable, quota exceeded, model not pulled, ...
         raise HTTPException(
             503,
-            f"Model '{body.model_id or c.models.default_id}' is unavailable ({type(e).__name__}). "
-            "If it is an Ollama model, check that Ollama is running and the model is pulled, or pick another model.",
+            f"Model '{model_id}' failed ({type(e).__name__}). Check that its provider is reachable and configured "
+            "(Ollama running and the model pulled, or the Gemini key valid with quota), or pick another model.",
         )
     v = state.get("verification")
     return {
         "answer": state["answer"],
         "abstained": state["abstained"],
         "abstain_reason": state.get("abstain_reason"),
-        "model_id": body.model_id or c.models.default_id,
+        "model_id": model_id,
         "sources": [s.__dict__ for s in state.get("sources", [])] if not state["abstained"] else [],
         "verification": {"passed": v.passed, "reason": v.reason, "coverage": v.coverage} if v else None,
         "trace": state["trace"],

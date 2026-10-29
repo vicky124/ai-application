@@ -34,6 +34,7 @@ button.link { background:none; color:var(--accent); padding:0; text-align:left; 
 .error { color:var(--err); margin:0; }
 .ok { color:var(--ok); margin:8px 0 0; font-weight:600; }
 .muted { color:var(--muted); font-size:.8rem; }
+.cloud { font-size:.72rem; padding:2px 8px; border-radius:999px; border:1px solid var(--warn); color:var(--warn); }
 .tabs { display:flex; gap:4px; }
 .tab { background:none; color:var(--muted); border:1px solid transparent; padding:6px 12px; }
 .tab.active { color:var(--fg); border-color:var(--border); background:var(--card); }

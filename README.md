@@ -37,14 +37,16 @@ pipeline is available as a streaming API: `POST /api/documents/ingest`. See the
 
 ## Model selection
 - **Config level:** `ModelSpec` list in [`backend/app/config.py`](backend/app/config.py), or a JSON file via `MODELS_CONFIG`
-  (`[{"id","label","provider","name","default"}]`). Defaults: Llama 3.1 8B, Qwen 2.5 7B, Mistral 7B (Ollama) and an offline extractive mode.
+  (`[{"id","label","provider","name","default"}]`). Defaults: Llama 3.1 8B, Qwen 2.5 7B, Mistral 7B (Ollama, local), three Google **Gemini** models (cloud) and an offline extractive mode.
+  Gemini needs `GOOGLE_API_KEY` in `backend/.env`; without it those options show as unavailable. **Gemini sends the question and retrieved
+  passages to Google**, so use the local models for documents that must not leave your machine.
   Embeddings are fixed per collection (vector size), so they are chosen in config only (`EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`).
 - **Application level:** the UI has a model dropdown fed by `GET /api/models`; each chat request sends `model_id`.
 
 ## Design (SOLID)
 - **Single responsibility:** parsing, chunking, storage, ingestion, generation, verification, guarding and orchestration are separate modules.
 - **Open/closed:** new LLM providers, embedding providers and file parsers are added by registering a class (`Registry`, `ParserRegistry`), not by editing callers.
-- **Liskov:** every `AnswerGenerator` (Ollama via LangChain, extractive) is interchangeable behind the same contract.
+- **Liskov:** every `AnswerGenerator` (Ollama and Gemini via LangChain, extractive) is interchangeable behind the same contract.
 - **Interface segregation:** small Protocols in [`app/interfaces.py`](backend/app/interfaces.py) (`VectorStore`, `AnswerGenerator`, `Verifier`, `InputGuard`, `DocumentParser`).
 - **Dependency inversion:** the agent and ingestion service depend on those Protocols; [`app/container.py`](backend/app/container.py) is the only composition root.
 
@@ -81,14 +83,14 @@ Open http://localhost:5173. On first start with an empty users table, demo accou
 `SEED_DEMO_USERS=false` disables it): `alice/alice123` (employee), `mark/mark123` (manager), `hannah/hannah123` (HR),
 `carl/carl123` (compliance), `root/root123` (admin). Create a real administrator with
 `python -m app.db.manage create-admin --username <name>`.
-Without Ollama, pick "No LLM (extractive, offline)". The first start downloads the embedding model and indexes `backend/data/sample_docs`.
+Without Ollama, pick "No LLM (extractive, offline)" (or a Gemini model if you set a key). The first start downloads the embedding model and indexes `backend/data/sample_docs`.
 
 Optional services (Qdrant server, Ollama): `docker compose up -d`, then set `QDRANT_URL` (see `backend/.env.example`).
 
 ## Tests
 ```bash
 cd backend
-.venv/Scripts/python -m pytest        # 59 tests; uses SQLite unless TEST_DATABASE_URL points to Postgres
+.venv/Scripts/python -m pytest        # 71 tests; uses SQLite unless TEST_DATABASE_URL points to Postgres
 ```
 
 ## Layout

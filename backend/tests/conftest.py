@@ -11,6 +11,8 @@ os.environ["MIN_RETRIEVAL_SCORE"] = "0.15"
 os.environ["DATABASE_URL"] = os.environ.get("TEST_DATABASE_URL") or f"sqlite:///{Path(tempfile.mkdtemp(prefix='auth_test_')) / 'auth.db'}"
 os.environ["JWT_SECRET"] = "test-secret-test-secret-test-secret-123"
 os.environ["SEED_DEMO_USERS"] = "true"
+os.environ["GOOGLE_API_KEY"] = ""  # tests must never use a real key; empty means "not configured"
+os.environ["GEMINI_API_KEY"] = ""
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

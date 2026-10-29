@@ -1,5 +1,7 @@
 """AnswerGenerator implementations plus the registry that maps config ModelSpecs to them."""
 import re
+from dataclasses import dataclass
+from typing import Callable
 
 from app.config import ModelSpec, Settings
 from app.domain import Source
@@ -21,6 +23,19 @@ def format_sources(sources: list[Source]) -> str:
     return "\n\n".join(f"[{i}] ({s.title} - {s.section})\n{s.text}" for i, s in enumerate(sources, 1))
 
 
+def content_text(content) -> str:
+    """Chat models return a string, or (Gemini) a list of content parts; keep only the text."""
+    if isinstance(content, str):
+        return content.strip()
+    parts = []
+    for part in content or []:
+        if isinstance(part, str):
+            parts.append(part)
+        elif isinstance(part, dict) and part.get("type", "text") == "text":
+            parts.append(part.get("text", ""))
+    return "".join(parts).strip()
+
+
 class LangChainGenerator:
     """Wraps any LangChain chat model; works for every provider that exposes one."""
 
@@ -34,7 +49,7 @@ class LangChainGenerator:
                 ("human", f"Sources:\n{format_sources(sources)}\n\nQuestion: {question}"),
             ]
         )
-        return str(msg.content).strip()
+        return content_text(msg.content)
 
 
 class ExtractiveGenerator:
@@ -58,6 +73,21 @@ class ExtractiveGenerator:
         return " ".join(f"{sent.rstrip('.')} [{idx}]." for _, idx, sent in best)
 
 
+@dataclass(frozen=True)
+class ProviderInfo:
+    """What the UI and catalog need to know about a provider, beyond how to build it."""
+
+    local: bool  # False means retrieved text leaves this machine
+    check: Callable[[Settings], str | None] | None = None  # returns a reason when the provider cannot be used
+
+
+PROVIDERS: dict[str, ProviderInfo] = {}
+
+
+class ModelUnavailable(RuntimeError):
+    """The model is configured but cannot be used right now (for example a missing API key)."""
+
+
 @GENERATORS.register("ollama")
 def _ollama(spec: ModelSpec, settings: Settings):
     from langchain_ollama import ChatOllama
@@ -67,9 +97,25 @@ def _ollama(spec: ModelSpec, settings: Settings):
     )
 
 
+@GENERATORS.register("gemini")
+def _gemini(spec: ModelSpec, settings: Settings):
+    from langchain_google_genai import ChatGoogleGenerativeAI
+
+    return LangChainGenerator(
+        ChatGoogleGenerativeAI(model=spec.name, google_api_key=settings.gemini_key, temperature=spec.temperature)
+    )
+
+
 @GENERATORS.register("extractive")
 def _extractive(spec: ModelSpec, settings: Settings):
     return ExtractiveGenerator()
+
+
+PROVIDERS["ollama"] = ProviderInfo(local=True)
+PROVIDERS["extractive"] = ProviderInfo(local=True)
+PROVIDERS["gemini"] = ProviderInfo(
+    local=False, check=lambda s: None if s.gemini_key else "GOOGLE_API_KEY is not set on the server"
+)
 
 
 class ModelCatalog:
@@ -85,10 +131,26 @@ class ModelCatalog:
     def specs(self) -> list[ModelSpec]:
         return list(self._specs.values())
 
+    def describe(self, spec: ModelSpec) -> dict:
+        """Selection metadata for the UI: whether the model runs locally and whether it can be used now."""
+        info = PROVIDERS.get(spec.provider, ProviderInfo(local=True))
+        reason = info.check(self._settings) if info.check else None
+        return {
+            "id": spec.id,
+            "label": spec.label,
+            "provider": spec.provider,
+            "local": info.local,
+            "available": reason is None,
+            "unavailable_reason": reason,
+        }
+
     def get(self, model_id: str | None):
         model_id = model_id or self.default_id
         if model_id not in self._specs:
             raise KeyError(model_id)
+        reason = self.describe(self._specs[model_id])["unavailable_reason"]
+        if reason:
+            raise ModelUnavailable(reason)
         if model_id not in self._cache:
             self._cache[model_id] = GENERATORS.create(
                 self._specs[model_id].provider, spec=self._specs[model_id], settings=self._settings

@@ -24,6 +24,10 @@ DEFAULT_MODELS = [
     ModelSpec(id="llama3.1-8b", label="Llama 3.1 8B (Ollama)", provider="ollama", name="llama3.1:8b", default=True),
     ModelSpec(id="qwen2.5-7b", label="Qwen 2.5 7B (Ollama)", provider="ollama", name="qwen2.5:7b"),
     ModelSpec(id="mistral-7b", label="Mistral 7B (Ollama)", provider="ollama", name="mistral:7b"),
+    # Google Gemini (cloud). Floating aliases follow Google's current Flash/Pro; override ids in MODELS_CONFIG to pin.
+    ModelSpec(id="gemini-flash", label="Gemini Flash, latest (Google, cloud)", provider="gemini", name="gemini-flash-latest"),
+    ModelSpec(id="gemini-pro", label="Gemini Pro, latest (Google, cloud)", provider="gemini", name="gemini-pro-latest"),
+    ModelSpec(id="gemini-2.5-flash", label="Gemini 2.5 Flash (Google, cloud)", provider="gemini", name="gemini-2.5-flash"),
     ModelSpec(id="extractive", label="No LLM (extractive, offline)", provider="extractive"),
 ]
 
@@ -34,6 +38,9 @@ class Settings(BaseSettings):
     # Optional JSON file with a list of ModelSpec objects; overrides DEFAULT_MODELS.
     models_config: str | None = None
     ollama_base_url: str = "http://localhost:11434"
+    # Gemini is a cloud service: retrieved policy text is sent to Google when a Gemini model is selected.
+    google_api_key: str | None = None  # env GOOGLE_API_KEY
+    gemini_api_key: str | None = None  # env GEMINI_API_KEY, accepted as an alternative name
 
     # Qdrant: qdrant_url targets a server (docker compose); otherwise embedded local storage.
     qdrant_url: str | None = None
@@ -67,6 +74,11 @@ class Settings(BaseSettings):
     sample_docs_dir: str = str(BASE_DIR / "data" / "sample_docs")
     autoload_samples: bool = True
     cors_origins: list[str] = ["http://localhost:5173"]
+
+    @property
+    def gemini_key(self) -> str | None:
+        """The Gemini API key from GOOGLE_API_KEY or GEMINI_API_KEY; empty strings count as not set."""
+        return self.google_api_key or self.gemini_api_key or None
 
     @property
     def models(self) -> list[ModelSpec]:

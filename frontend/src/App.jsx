@@ -14,6 +14,7 @@ export default function App() {
   const [view, setView] = useState("chat");
   const endRef = useRef(null);
   const canIngest = Boolean(user?.permissions?.includes("documents:manage"));
+  const selectedModel = models.find((m) => m.id === modelId);
 
   useEffect(() => {
     if (api.hasToken()) loadSession().catch(() => api.logout());
@@ -27,7 +28,8 @@ export default function App() {
     const [me, m] = await Promise.all([api.me(), api.models()]);
     setUser(me);
     setModels(m.models);
-    setModelId(m.default);
+    const usable = m.models.find((x) => x.id === m.default && x.available) || m.models.find((x) => x.available);
+    setModelId(usable ? usable.id : m.default);
   }
 
   async function send(e) {
@@ -80,13 +82,28 @@ export default function App() {
             <label>
               Model{" "}
               <select value={modelId} onChange={(e) => setModelId(e.target.value)}>
-                {models.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.label}
-                  </option>
-                ))}
+                {[
+                  ["Local (open source, stays on this machine)", models.filter((m) => m.local)],
+                  ["Cloud (retrieved text is sent to the provider)", models.filter((m) => !m.local)],
+                ]
+                  .filter(([, group]) => group.length > 0)
+                  .map(([title, group]) => (
+                    <optgroup key={title} label={title}>
+                      {group.map((m) => (
+                        <option key={m.id} value={m.id} disabled={!m.available}>
+                          {m.label}
+                          {!m.available ? ` — unavailable: ${m.unavailable_reason}` : ""}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
               </select>
             </label>
+          )}
+          {view === "chat" && selectedModel && !selectedModel.local && (
+            <span className="cloud" title="Retrieved policy passages and your question are sent to the model provider">
+              cloud model
+            </span>
           )}
           <span className="user">
             {user.name} · {user.role}

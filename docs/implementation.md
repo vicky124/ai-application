@@ -379,7 +379,7 @@ and verifies counts, foreign keys, manager links, idempotency and every sample p
 
 ### 7A.7 Testing against Postgres and SQLite
 The suite runs on a throwaway **SQLite** file by default (the `auth` schema is mapped away), so it works offline. Set
-`TEST_DATABASE_URL=postgresql+psycopg://policy:policy@localhost:5433/policy_test` to run the same 59 tests against
+`TEST_DATABASE_URL=postgresql+psycopg://policy:policy@localhost:5433/policy_test` to run the same 71 tests against
 PostgreSQL. Both have been run: on **PostgreSQL 16.15** the migration builds the schema from scratch (identical to
 `schema.sql`), `JSONB`, identity columns and constraints behave as designed, and every test passes. Running against
 Postgres found nothing that SQLite had hidden, but it did lead to storing absent audit details as SQL `NULL` instead of
@@ -395,7 +395,9 @@ ModelSpec(id="llama3.1-8b", label="Llama 3.1 8B (Ollama)", provider="ollama",
 ```
 
 **Config level**
-- Defaults live in `config.py` (`DEFAULT_MODELS`): Llama 3.1 8B (default), Qwen 2.5 7B, Mistral 7B, and `extractive`.
+- Defaults live in `config.py` (`DEFAULT_MODELS`): Llama 3.1 8B (default), Qwen 2.5 7B, Mistral 7B (all Ollama, local), three **Gemini** models (Google, cloud) and `extractive`.
+- **Gemini** uses `langchain-google-genai`. The defaults are the floating aliases `gemini-flash-latest` and `gemini-pro-latest` (they follow Google's current Flash and Pro, so no code change when Google retires a version) plus the stable `gemini-2.5-flash`. Google's model lineup changes often: check [Google's model list](https://ai.google.dev/gemini-api/docs/models) and pin exact ids in `MODELS_CONFIG` when you need reproducible behavior.
+- The key comes from `GOOGLE_API_KEY` (or `GEMINI_API_KEY`) in `backend/.env`. Without it the Gemini options are still listed but marked unavailable.
 - Override with `MODELS_CONFIG=/path/models.json`, a JSON array of `ModelSpec` objects. Example:
   ```json
   [
@@ -406,8 +408,10 @@ ModelSpec(id="llama3.1-8b", label="Llama 3.1 8B (Ollama)", provider="ollama",
 - Embeddings are chosen only here (`EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`) because a collection's vector size is fixed. The collection name embeds the provider and model (for example `policy_chunks__fastembed_baai_bge_small_en_v1_5`), so changing embedding models creates a **new, empty collection** that is re-populated from the sample docs on startup. Upload documents again if you ingested your own.
 
 **Application level**
-- `GET /api/models` returns the list and the default; the UI dropdown renders it.
-- `POST /api/chat` accepts an optional `model_id`. Unknown id returns 400. A provider that cannot be built or reached returns 503 with a message to check Ollama.
+- `GET /api/models` returns the default and, for each model, `{id, label, provider, local, available, unavailable_reason}`. The UI groups them into **Local** and **Cloud**, disables unavailable ones and shows the reason, and shows a "cloud model" badge while one is selected.
+- `POST /api/chat` accepts an optional `model_id`. Unknown id returns 400. A model that is configured but unusable (for example Gemini without a key) returns 503 with the reason. A provider failure during generation (unreachable, quota, invalid key) returns 503 with only the exception *type* and a generic hint, so provider error text, which can contain key fragments, never reaches the client.
+
+**Data handling for cloud models.** When a Gemini model is selected, the user's question and the retrieved policy passages are sent to Google. Retrieval still applies the caller's role and document-status filters first, so only passages that user may read are sent, but the text does leave your infrastructure. Use the local models for documents that must not leave it, and review Google's data-use terms for your API tier before enabling Gemini on confidential policies. Embeddings are always local.
 - The chosen model id is echoed in the response and shown under each answer.
 
 ## 9. Data model and Qdrant storage
@@ -452,7 +456,7 @@ tables below list every route.
 | `POST /api/users/{id}/reset-password` | `users:manage` | Body `{new_password}`. 204; signs the user out everywhere. |
 | `GET /api/roles` | `users:read` | Roles with level and permissions. |
 | `GET /api/audit-log` | `audit:read` | Query `action`, `username`, `offset`, `limit`. Newest first. |
-| `GET /api/models` | `chat:use` | `{default, models: [{id, label, provider}]}`. |
+| `GET /api/models` | `chat:use` | `{default, models: [{id, label, provider, local, available, unavailable_reason}]}`. |
 | `POST /api/chat` | any | Body `{question, model_id?}`. See response below. |
 | `GET /api/documents` | admin, hr, compliance | Documents with chunk counts. |
 | `POST /api/documents` | admin, hr, compliance | Multipart: `file`, `title`, `doc_id`, `department`, `version`, `allowed_roles` (comma list or `all`), `status` (`active`, `inactive`, `draft`). Re-using a `doc_id` replaces the document. Returns `{doc_id, chunks}`. 400 for invalid metadata, unsupported file types or other pipeline failures. |
@@ -494,6 +498,7 @@ Set as environment variables or in `backend/.env` (see `.env.example`). Names ar
 |---|---|---|
 | `MODELS_CONFIG` | none | JSON file overriding the model list |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama endpoint |
+| `GOOGLE_API_KEY` / `GEMINI_API_KEY` | none | Enables the Gemini models. Server-side only; never sent to the browser. Empty means not configured |
 | `QDRANT_URL` | none | Qdrant server URL; if unset, embedded storage is used |
 | `QDRANT_PATH` | `backend/data/qdrant` | Embedded storage directory |
 | `QDRANT_COLLECTION_PREFIX` | `policy_chunks` | Prefix of the collection name |
@@ -565,7 +570,7 @@ The token lives in `sessionStorage` (cleared when the tab closes). Chat history 
 ## 14. Testing
 
 ```bash
-cd backend && .venv/Scripts/python -m pytest      # 59 tests
+cd backend && .venv/Scripts/python -m pytest      # 71 tests
 ```
 
 `tests/conftest.py` sets environment variables **before** importing the app: `EMBEDDING_PROVIDER=hash`,
@@ -580,6 +585,7 @@ cd backend && .venv/Scripts/python -m pytest      # 59 tests
 | `test_auth.py` | Login (tokens, claims, case-insensitive username, identical errors for unknown user and wrong password); lockout and counter reset; 9 forged or invalid token cases (expired, wrong secret, wrong issuer, wrong type, unknown user, `alg=none`, refresh token as bearer, garbage); refresh rotation and replay detection; logout and logout-all; change password and admin reset (old tokens and sessions die); role-and-permission matrix across employee, HR, compliance and admin; 401 versus 403; immediate effect of role change and deactivation; self-lockout protection; user validation (policy, duplicates, roles, managers, cycles); filtering and pagination; audit log contents |
 | `test_schema.py` | Alembic migration and SQLAlchemy models define the same tables, constraints and indexes (offline SQL generation); everything is in the `auth` schema |
 | `test_sql_scripts.py` | `/db` scripts match the generator; schema script creates every table and stamps Alembic; drop script touches only `auth`; sample data loads (SQLite), has consistent counts, foreign keys, role levels and manager links, is idempotent, reproducible, and every password verifies |
+| `test_models.py` | Gemini options in the default catalog (cloud-labelled, open-source model stays the default); availability follows the API key (either env name, empty means unset); catalog refuses Gemini without a key and builds it with one (no network); `MODELS_CONFIG` can pin a Gemini id; content-part parsing; `/api/models` fields; 503 with a clear reason without a key; end-to-end chat through a fake Gemini; provider failures never leak error text or key fragments |
 
 Not covered by automated tests: the Ollama path (needs a running server), real-embedding relevance, the
 frontend, PDF parsing, and Postgres in CI (the suite uses SQLite unless `TEST_DATABASE_URL` is set; it has been run on
